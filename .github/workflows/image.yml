@@ -1,0 +1,40 @@
+# Builds the image on every push to main and pushes it to ghcr.io/pixec/kontainer, tagged
+# with the commit time (UTC) and the short SHA: 20261022-153000-abc1234.
+name: image
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: image
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/pixec/kontainer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Work out the tag
+        id: tag
+        run: |
+          stamp=$(TZ=UTC git show -s --format=%cd --date=format-local:%Y%m%d-%H%M%S HEAD)
+          echo "tag=${stamp}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
+          # The Rust build is long; keep its layers between runs.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
