@@ -47,11 +47,9 @@ impl fmt::Debug for Secret {
     }
 }
 
-impl fmt::Display for Secret {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(REDACTED)
-    }
-}
+// No `Display`: APIs such as reqwest's `basic_auth` accept any `Display`, and a redacted
+// placeholder would be sent instead of the secret. Use `expose()` to send it, and `Debug` or
+// `redacted()` to show it.
 
 impl Serialize for Secret {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
@@ -157,7 +155,7 @@ mod tests {
     fn never_shown() {
         let s: Secret = toml::from_str::<toml::Table>("v = \"hunter2\"").unwrap()["v"].clone().try_into().unwrap();
         assert_eq!(s.expose(), "hunter2");
-        assert_eq!(format!("{s:?} {s}"), "[redacted] [redacted]");
+        assert_eq!(format!("{s:?}"), "[redacted]");
         assert_eq!(toml::Value::try_from(&s).unwrap().as_str(), Some(REDACTED));
         assert_eq!(toml::Value::try_from(Secret::default()).unwrap().as_str(), Some(""));
     }

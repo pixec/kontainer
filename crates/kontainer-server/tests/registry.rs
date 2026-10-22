@@ -1711,7 +1711,15 @@ async fn organization_sso_and_team_sync() {
     let idp = axum::Router::new()
         .route("/.well-known/openid-configuration", axum::routing::get(move || { let i = iss.clone(); async move { axum::Json(json!({ "issuer": i, "authorization_endpoint": format!("{i}/authorize"), "token_endpoint": format!("{i}/token"), "jwks_uri": format!("{i}/jwks") })) } }))
         .route("/jwks", axum::routing::get(move || { let jwk = jwk.clone(); async move { axum::Json(json!({ "keys": [jwk] })) } }))
-        .route("/token", axum::routing::post(move || { let t = tok.lock().unwrap().clone(); async move { axum::Json(json!({ "id_token": t, "token_type": "Bearer" })) } }));
+        // Like a real provider: client authentication is the Basic header, and it must carry the
+        // real secret (a redacted placeholder is exactly what a Display-based bug would send).
+        .route("/token", axum::routing::post(move |h: axum::http::HeaderMap| { let t = tok.lock().unwrap().clone(); async move {
+            let want = format!("Basic {}", base64::engine::general_purpose::STANDARD.encode("kontainer:s3cret"));
+            if h.get("authorization").and_then(|v| v.to_str().ok()) != Some(want.as_str()) {
+                return axum::response::IntoResponse::into_response((StatusCode::UNAUTHORIZED, axum::Json(json!({ "error": "invalid_client" }))));
+            }
+            axum::response::IntoResponse::into_response(axum::Json(json!({ "id_token": t, "token_type": "Bearer" })))
+        } }));
     tokio::spawn(async move { axum::serve(listener, idp).await.unwrap() });
     let enc = jsonwebtoken::EncodingKey::from_ec_pem(sk.to_pkcs8_pem(p256::pkcs8::LineEnding::LF).unwrap().as_bytes()).unwrap();
 
@@ -1836,7 +1844,15 @@ async fn organization_sso_link_and_login_csrf() {
     let idp = axum::Router::new()
         .route("/.well-known/openid-configuration", axum::routing::get(move || { let i = iss.clone(); async move { axum::Json(json!({ "issuer": i, "authorization_endpoint": format!("{i}/authorize"), "token_endpoint": format!("{i}/token"), "jwks_uri": format!("{i}/jwks") })) } }))
         .route("/jwks", axum::routing::get(move || { let jwk = jwk.clone(); async move { axum::Json(json!({ "keys": [jwk] })) } }))
-        .route("/token", axum::routing::post(move || { let t = tok.lock().unwrap().clone(); async move { axum::Json(json!({ "id_token": t, "token_type": "Bearer" })) } }));
+        // Like a real provider: client authentication is the Basic header, and it must carry the
+        // real secret (a redacted placeholder is exactly what a Display-based bug would send).
+        .route("/token", axum::routing::post(move |h: axum::http::HeaderMap| { let t = tok.lock().unwrap().clone(); async move {
+            let want = format!("Basic {}", base64::engine::general_purpose::STANDARD.encode("kontainer:s3cret"));
+            if h.get("authorization").and_then(|v| v.to_str().ok()) != Some(want.as_str()) {
+                return axum::response::IntoResponse::into_response((StatusCode::UNAUTHORIZED, axum::Json(json!({ "error": "invalid_client" }))));
+            }
+            axum::response::IntoResponse::into_response(axum::Json(json!({ "id_token": t, "token_type": "Bearer" })))
+        } }));
     tokio::spawn(async move { axum::serve(listener, idp).await.unwrap() });
     let enc = jsonwebtoken::EncodingKey::from_ec_pem(sk.to_pkcs8_pem(p256::pkcs8::LineEnding::LF).unwrap().as_bytes()).unwrap();
 

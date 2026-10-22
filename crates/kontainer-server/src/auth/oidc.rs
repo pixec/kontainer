@@ -192,7 +192,7 @@ impl Oidc {
         let resp = self
             .http
             .post(&d.token_endpoint)
-            .basic_auth(&self.cfg.client_id, Some(&self.cfg.client_secret))
+            .basic_auth(&self.cfg.client_id, Some(self.cfg.client_secret.expose()))
             .form(&[
                 ("grant_type", "authorization_code"),
                 ("code", code),
