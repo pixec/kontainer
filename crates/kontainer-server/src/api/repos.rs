@@ -306,15 +306,17 @@ async fn create_repository(State(state): State<AppState>, Extension(p): Extensio
         return Err(RegistryError::bad_request(format!("{ns} is a pull-through cache; its repositories come from the upstream")));
     }
     // A repository belongs to a user or an organization. Even a superuser, who may push anywhere,
-    // gets no ownerless `nobody/app` from the UI: the namespace must exist first.
-    if name.contains('/') {
+    // gets no ownerless `nobody/app` from the UI: the namespace must exist first. Without
+    // accounts (`auth.mode = "none"`) there are no owners, so any namespace is fine.
+    if !name.contains('/') {
+        return Err(RegistryError::bad_request("a repository name needs a namespace: <user or organization>/<name>"));
+    }
+    if state.config.auth.mode != kontainer_core::config::AuthMode::None {
         let db = &state.auth.db;
         let owned = db.user_by_name(ns).await?.is_some_and(|u| !u.is_robot) || db.org_by_name(ns).await?.is_some();
         if !owned {
             return Err(RegistryError::bad_request(format!("{ns} is not a user or organization; create the organization first, or use your own namespace")));
         }
-    } else {
-        return Err(RegistryError::bad_request("a repository name needs a namespace: <user or organization>/<name>"));
     }
     // The first push's rule: decided on what storage and the catalogue hold now (see
     // `confirm_new_repo`), so an existing repository is never passed off as new.
