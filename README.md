@@ -370,6 +370,8 @@ Endpoints:
 |--------|------|-------|
 | GET | `/api/v1/me` | caller identity, roles, enabled features |
 | GET | `/api/v1/repositories` | repositories visible to the caller, with tag counts and allowed actions |
+| POST | `/api/v1/repositories` | create an empty repository: `{name, description?, visibility?, topics?}`; 201 with the `repository-meta` view, 409 if it exists; allowed to whoever may push it into existence |
+| GET | `/api/v1/repositories/{name}` | one repository's listing entry (`tags: 0` when created empty) |
 | GET | `/api/v1/repositories/{name}/tags` | tags with digest, media type and scan summary |
 | GET | `/api/v1/repositories/{name}/manifests/{ref}` | resolved manifest: layers joined to history, parsed config, index children, referrers, scan |
 | GET | `/api/v1/repositories/{name}/manifests/{ref}/layers/{digest}/files?limit=` | files inside a layer |

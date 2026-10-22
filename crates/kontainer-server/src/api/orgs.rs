@@ -148,7 +148,7 @@ async fn get_org(State(state): State<AppState>, Extension(p): Extension<Principa
         robots.push(super::auth::robot_view(&state, r).await?);
     }
     let prefix = format!("{name}/");
-    let repositories = state.storage.list_repositories().await?.into_iter().filter(|r| r.starts_with(&prefix) && p.can_see(r)).collect();
+    let repositories = state.repository_names().await?.into_iter().filter(|r| r.starts_with(&prefix) && p.can_see(r)).collect();
     let time_machine_secs = db.time_machine_secs(&name).await?;
     Ok(Json(OrgDetail { is_admin: p.is_org_admin(&name), org: o, teams, robots, repositories, time_machine_secs, default_time_machine_secs: state.config.policy.time_machine.as_secs() }).into_response())
 }
@@ -207,13 +207,13 @@ pub async fn rename_namespace(state: &AppState, old: &str, new: &str, org_id: Op
     if state.auth.db.name_taken(new).await? {
         return Err(RegistryError::conflict("that name is already used by a user or organization"));
     }
-    if state.storage.namespace_has_repositories(new).await? {
+    if state.storage.namespace_has_repositories(new).await? || state.auth.db.catalogue_has_namespace(new).await? {
         return Err(RegistryError::conflict("repositories already exist under that name"));
     }
     // Announces the change to the other instances' repository sets and search indexes.
     state.auth.db.rename_namespace(old, new, org_id, user_id).await?;
     state.auth.refresh_public_repos().await?;
-    state.auth.set_known_repos(state.storage.list_repositories().await?).await;
+    state.auth.set_known_repos(state.repository_names().await?).await;
     state.rebuild_search().await?;
     tracing::info!(%old, %new, "namespace renamed");
     Ok(())

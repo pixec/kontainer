@@ -328,6 +328,17 @@ impl AppState {
         crate::search::reindex(&self.storage, &self.auth.db, &self.config.auth.public_repositories, &self.search, repository).await
     }
 
+    /// Every repository, sorted: those with content in storage and those only in the catalogue
+    /// (created empty, nothing pushed yet).
+    pub async fn repository_names(&self) -> anyhow::Result<Vec<String>> {
+        all_repository_names(&self.storage, &self.auth.db).await
+    }
+
+    /// Whether `repository` exists: it has a manifest, or a catalogue entry (created empty).
+    pub async fn repository_known(&self, repository: &str) -> anyhow::Result<bool> {
+        Ok(self.storage.repository_exists(repository).await? || self.auth.db.in_catalogue(repository).await?)
+    }
+
     /// Rebuild the whole search index from storage (startup, namespace renames).
     pub async fn rebuild_search(&self) -> anyhow::Result<usize> {
         crate::search::rebuild(&self.storage, &self.auth.db, &self.config.auth.public_repositories, &self.search).await
@@ -413,6 +424,15 @@ impl AppState {
             .iter()
             .any(|r| glob::any_matches(&r.repositories, repository) && glob::any_matches(&r.tags, tag))
     }
+}
+
+/// Repositories in storage plus catalogue-only ones, sorted and without duplicates.
+pub async fn all_repository_names(storage: &Storage, db: &crate::database::Db) -> anyhow::Result<Vec<String>> {
+    let mut names = storage.list_repositories().await?;
+    names.extend(db.catalogue_names().await?);
+    names.sort();
+    names.dedup();
+    Ok(names)
 }
 
 #[cfg(test)]

@@ -45,7 +45,7 @@ pub async fn reindex(storage: &kontainer_store::Storage, db: &crate::database::D
 /// Rebuild the whole index from the registry tables. Returns the repositories indexed.
 pub async fn rebuild(storage: &kontainer_store::Storage, db: &crate::database::Db, public: &[String], index: &SearchIndex) -> Result<usize> {
     let mut docs = vec![];
-    for name in storage.list_repositories().await? {
+    for name in crate::state::all_repository_names(storage, db).await? {
         docs.push(repo_doc(storage, db, public, &name).await?);
     }
     index.rebuild(docs)

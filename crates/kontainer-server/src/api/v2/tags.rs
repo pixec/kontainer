@@ -52,7 +52,8 @@ pub async fn catalog(
     if !state.config.features.is_catalog {
         return Err(RegistryError::new(Code::Unsupported));
     }
-    let repos: Vec<String> = state.storage.list_repositories().await?.into_iter().filter(|r| principal.can_see(r)).collect();
+    // Repositories created empty are listed too (their tag list is still NAME_UNKNOWN).
+    let repos: Vec<String> = state.repository_names().await?.into_iter().filter(|r| principal.can_see(r)).collect();
     let (page, more) = paginate(&repos, &query)?;
     let mut headers = HeaderMap::new();
     if let (Some(n), Some(last)) = (more, page.last()) {

@@ -99,7 +99,8 @@ pub struct Principal {
     pub teams: Vec<TeamGrant>,
     /// Explicit repository grants (direct or through a team), strongest level per repository.
     pub repo_grants: Arc<HashMap<String, Level>>,
-    /// Repositories that have content; Creator teams may push only to repositories not in it.
+    /// Repositories that exist (have content or a catalogue entry); Creator teams may push only
+    /// to repositories not in it.
     pub known_repos: Arc<HashSet<String>>,
     /// Pull-through cache namespaces and whether anonymous pulls are allowed.
     pub proxies: Arc<HashMap<String, bool>>,
@@ -420,6 +421,19 @@ impl Authenticator {
     pub async fn note_repo(&self, repository: &str, exists: bool) {
         if self.caches.set_known(repository, exists).await {
             self.db.notify(&Topic::Repo(repository.to_string())).await;
+        }
+    }
+
+    /// A push or `POST /api/v1/repositories` brought `repository` into existence: when only a
+    /// Creator team allowed that ([`Principal::creates`]), its author becomes the repository's
+    /// admin. Call before recording that the repository exists.
+    pub async fn grant_creator(&self, p: &Principal, repository: &str) -> Result<bool> {
+        match p.user_id {
+            Some(uid) if p.creates(repository) => {
+                self.db.set_user_grant(repository, uid, Some(Level::ADMIN)).await?;
+                Ok(true)
+            }
+            _ => Ok(false),
         }
     }
 
@@ -953,6 +967,8 @@ impl Caches {
                 repos.insert(name);
             }
         }
+        // Created empty: it exists, and is no longer a Creator team's to push into existence.
+        repos.extend(self.db.catalogue_names().await?);
         *self.known_repos.write().await = Arc::new(repos);
         Ok(())
     }
@@ -961,7 +977,7 @@ impl Caches {
     /// storage to ask.
     async fn recheck_repo(&self, repository: &str) -> Result<Option<bool>> {
         let Some(storage) = self.storage.get() else { return Ok(None) };
-        let exists = storage.repository_exists(repository).await?;
+        let exists = storage.repository_exists(repository).await? || self.db.in_catalogue(repository).await?;
         self.set_known(repository, exists).await;
         Ok(Some(exists))
     }

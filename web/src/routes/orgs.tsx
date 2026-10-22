@@ -28,6 +28,7 @@ import { StarToggle } from "@/components/star-button"
 import { useSession } from "@/lib/session"
 import { BackLink, ErrorBox, Loading, Mono } from "@/components/ui-bits"
 import { formatWindow } from "@/components/tag-history"
+import { NewRepositoryDialog } from "@/components/new-repository-dialog"
 import { OrgSsoSection, TeamSyncDialog, syncLabel } from "@/components/org-sso"
 import { RobotFederationDialog } from "@/components/robot-federation"
 import { DangerRow, ENTITY_MARK, Empty, EntityHeader, FormSection, LabeledSelect, OrgMark, Panel, SearchInput, Secret, SideNav, StackedSections } from "@/components/page"
@@ -177,6 +178,7 @@ export function OrgPage() {
   const robotForm = useForm({ defaultValues: { name: "", description: "" }, onSubmit: async ({ value, formApi }) => { await createRobot.mutateAsync(value); formApi.reset() } })
   const [showRobotForm, setShowRobotForm] = useState(false)
   const repos = useQuery({ queryKey: ["repositories"], queryFn: endpoints.repositories })
+  const [creatingRepo, setCreatingRepo] = useState(false)
   if (q.isLoading) return <Loading />
   if (q.error) return <ErrorBox error={q.error} />
   const o = q.data!
@@ -204,7 +206,11 @@ export function OrgPage() {
         </TabsList>
 
         <TabsContent value="repositories" className="space-y-4">
-          <p className="text-sm text-muted-foreground">Push with <Mono className="text-foreground">docker push {location.host}/{o.name}/&lt;name&gt;:&lt;tag&gt;</Mono></p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-muted-foreground">Push with <Mono className="text-foreground">docker push {location.host}/{o.name}/&lt;name&gt;:&lt;tag&gt;</Mono></p>
+            {(isMine || o.is_admin) && <Button size="sm" onClick={() => setCreatingRepo(true)}><PlusIcon />New repository</Button>}
+          </div>
+          {(isMine || o.is_admin) && <NewRepositoryDialog key={o.name} namespace={o.name} open={creatingRepo} onOpenChange={setCreatingRepo} />}
           <Table>
             <TableHeader><TableRow><TableHead className="pl-0">Name</TableHead><TableHead className="w-28">Stars</TableHead><TableHead className="w-28">Tags</TableHead><TableHead className="hidden w-48 md:table-cell">Updated</TableHead></TableRow></TableHeader>
             <TableBody>

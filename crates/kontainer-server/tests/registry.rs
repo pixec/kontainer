@@ -4231,3 +4231,190 @@ async fn upload_and_reference_errors_follow_the_spec() {
         assert_eq!(r.json()["errors"][0]["code"], "UNSUPPORTED", "{uri}");
     }
 }
+
+/// `POST /api/v1/repositories`: an empty repository, created by whoever may push it into
+/// existence, listed everywhere with no tags, and no longer a Creator team's to take.
+#[tokio::test]
+async fn creating_empty_repositories() {
+    let app = app(accounts_config()).await;
+    let jh = ("content-type", "application/json");
+    let root = cookie_of(&web_login(&app, "root", "rootpass123", None).await);
+    let body = serde_json::to_vec(&json!({ "name": "founder", "rules": [], "global": ["orgs:create"] })).unwrap();
+    send(&app, Method::POST, "/api/v1/roles", &[("cookie", &root), jh], body).await;
+    for u in ["ann", "ben", "cat", "dan"] {
+        let body = serde_json::to_vec(&json!({ "username": u, "password": "password123", "roles": if u == "ann" { vec!["founder"] } else { vec![] } })).unwrap();
+        assert_eq!(send(&app, Method::POST, "/api/v1/users", &[("cookie", &root), jh], body).await.status, StatusCode::CREATED);
+    }
+    let login = |u: &'static str| { let app = app.clone(); async move { cookie_of(&web_login(&app, u, "password123", None).await) } };
+    let (ben, cat) = (login("ben").await, login("cat").await);
+    let create = |cookie: String, body: Value| { let app = app.clone(); async move { send(&app, Method::POST, "/api/v1/repositories", &[("cookie", &cookie), jh], serde_json::to_vec(&body).unwrap()).await } };
+
+    // In one's own namespace: 201 with the repository-meta view.
+    let r = create(ben.clone(), json!({ "name": "ben/app", "description": "My app", "topics": ["go"] })).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&r.body));
+    let v = r.json();
+    assert_eq!((v["name"].as_str(), v["description"].as_str(), v["visibility"].as_str()), (Some("ben/app"), Some("My app"), Some("private")));
+    assert_eq!(v["topics"], json!(["go"]));
+    assert!(v["created_at"].is_string());
+    assert!(v["actions"].as_array().unwrap().contains(&json!("push")));
+    let meta = send(&app, Method::GET, "/api/v1/repository-meta/ben/app", &[("cookie", &ben)], vec![]).await.json();
+    assert_eq!(meta["name"], v["name"]);
+    assert_eq!(meta["created_at"], v["created_at"]);
+
+    // The repository page: 200 with no tags. The OCI tag list stays NAME_UNKNOWN.
+    let r = send(&app, Method::GET, "/api/v1/repositories/ben/app", &[("cookie", &ben)], vec![]).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", String::from_utf8_lossy(&r.body));
+    assert_eq!((r.json()["name"].as_str(), r.json()["tags"].as_u64()), (Some("ben/app"), Some(0)));
+    let r = send(&app, Method::GET, "/api/v1/repositories/ben/app/tags", &[("cookie", &ben)], vec![]).await;
+    assert_eq!((r.status, r.json()), (StatusCode::OK, json!([])));
+    let r = send(&app, Method::GET, "/v2/ben/app/tags/list", &[("cookie", &ben)], vec![]).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    assert_eq!(r.json()["errors"][0]["code"], "NAME_UNKNOWN");
+    assert_eq!(send(&app, Method::GET, "/api/v1/repositories/ben/nothing", &[("cookie", &ben)], vec![]).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(send(&app, Method::GET, "/api/v1/repositories/ben/app", &[("cookie", &cat)], vec![]).await.status, StatusCode::FORBIDDEN, "private");
+
+    // Listed: the UI catalogue, /v2/_catalog and search; others don't see it.
+    let r = send(&app, Method::GET, "/api/v1/repositories", &[("cookie", &ben)], vec![]).await;
+    let listed: Vec<(String, u64)> = r.json().as_array().unwrap().iter().map(|e| (e["name"].as_str().unwrap().to_string(), e["tags"].as_u64().unwrap())).collect();
+    assert_eq!(listed, vec![("ben/app".to_string(), 0)]);
+    let r = send(&app, Method::GET, "/v2/_catalog", &[("cookie", &ben)], vec![]).await;
+    assert_eq!(r.json()["repositories"], json!(["ben/app"]));
+    let r = send(&app, Method::GET, "/api/v1/search?q=app", &[("cookie", &ben)], vec![]).await;
+    assert_eq!(r.json()[0]["name"], "ben/app");
+    assert_eq!(r.json()[0]["tags"], 0);
+    assert_eq!(send(&app, Method::GET, "/api/v1/repositories", &[("cookie", &cat)], vec![]).await.json(), json!([]));
+
+    // Duplicates, bad names, other people's namespaces, bad topics.
+    assert_eq!(create(ben.clone(), json!({ "name": "ben/app" })).await.status, StatusCode::CONFLICT);
+    let r = create(ben.clone(), json!({ "name": "Ben/App" })).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(r.json()["code"], "NAME_INVALID");
+    assert_eq!(create(ben.clone(), json!({ "name": "cat/app" })).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(create(ben.clone(), json!({ "name": "ben/x", "topics": ["Not OK"] })).await.status, StatusCode::BAD_REQUEST);
+
+    // A repository with manifests exists too.
+    let cfg = b"{}";
+    let cd = push_blob(&app, "ben/pushed", cfg, Some(&basic("ben", "password123"))).await;
+    let r = send(&app, Method::PUT, "/v2/ben/pushed/manifests/v1", &[("cookie", &ben), ("content-type", OCI_MANIFEST)], image_manifest(&cd, cfg.len(), &[])).await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    assert_eq!(create(ben.clone(), json!({ "name": "ben/pushed" })).await.status, StatusCode::CONFLICT);
+
+    // An organization: Ann makes it (and is its admin); Cat is on a Creator team, Ben and Dan on
+    // a plain member team; later Dan joins the creators too.
+    let ann = login("ann").await;
+    assert_eq!(send(&app, Method::POST, "/api/v1/orgs", &[("cookie", &ann), jh], serde_json::to_vec(&json!({ "name": "acme" })).unwrap()).await.status, StatusCode::CREATED);
+    for (team, role) in [("builders", "creator"), ("people", "member")] {
+        let r = send(&app, Method::POST, "/api/v1/orgs/acme/teams", &[("cookie", &ann), jh], serde_json::to_vec(&json!({ "name": team, "role": role })).unwrap()).await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&r.body));
+    }
+    let join = |team: &'static str, user: &'static str| { let app = app.clone(); let ann = ann.clone(); async move {
+        let r = send(&app, Method::POST, &format!("/api/v1/orgs/acme/teams/{team}/members"), &[("cookie", &ann), jh], serde_json::to_vec(&json!({ "username": user })).unwrap()).await;
+        assert_eq!(r.status, StatusCode::NO_CONTENT, "{}", String::from_utf8_lossy(&r.body));
+    } };
+    join("builders", "cat").await;
+    join("people", "ben").await;
+    join("people", "dan").await;
+    let (ben, cat) = (login("ben").await, login("cat").await);
+
+    assert_eq!(create(ben.clone(), json!({ "name": "acme/ben-app" })).await.status, StatusCode::FORBIDDEN, "a plain member cannot create");
+    let r = create(cat.clone(), json!({ "name": "acme/svc", "visibility": "public" })).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&r.body));
+    assert_eq!(r.json()["visibility"], "public");
+    assert!(r.json()["actions"].as_array().unwrap().contains(&json!("permissions")), "the creator administers it at once");
+    let r = send(&app, Method::GET, "/api/v1/repository-permissions/acme/svc", &[("cookie", &cat)], vec![]).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json()["grants"], json!([{ "kind": "user", "name": "cat", "display_name": null, "is_robot": false, "level": "admin" }]));
+    let r = send(&app, Method::GET, "/api/v1/explore", &[], vec![]).await;
+    assert_eq!(r.json()["repositories"][0]["name"], "acme/svc");
+    assert_eq!(r.json()["repositories"][0]["tags"], 0);
+    let r = send(&app, Method::GET, "/api/v1/orgs/acme", &[("cookie", &cat)], vec![]).await;
+    assert_eq!(r.json()["repositories"], json!(["acme/svc"]));
+    // The creator pushes into it as usual.
+    let cat_basic = basic("cat", "password123");
+    let cd = push_blob(&app, "acme/svc", cfg, Some(&cat_basic)).await;
+    let r = send(&app, Method::PUT, "/v2/acme/svc/manifests/v1", &[("authorization", &cat_basic), ("content-type", OCI_MANIFEST)], image_manifest(&cd, cfg.len(), &[])).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&r.body));
+    // An empty repository is taken: another Creator can neither create it nor push it into existence.
+    let r = create(cat.clone(), json!({ "name": "acme/empty" })).await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    join("builders", "dan").await;
+    let dan_basic = basic("dan", "password123");
+    let dan = login("dan").await;
+    assert_eq!(create(dan.clone(), json!({ "name": "acme/empty" })).await.status, StatusCode::FORBIDDEN, "exists, and Dan cannot see it");
+    let r = send(&app, Method::POST, "/v2/acme/empty/blobs/uploads/", &[("authorization", &dan_basic)], vec![]).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", String::from_utf8_lossy(&r.body));
+    assert_eq!(create(dan.clone(), json!({ "name": "acme/dans" })).await.status, StatusCode::CREATED);
+    // Org admins create without becoming admins by grant: they already are.
+    let r = create(ann.clone(), json!({ "name": "acme/by-admin" })).await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    assert_eq!(send(&app, Method::GET, "/api/v1/repository-permissions/acme/by-admin", &[("cookie", &ann)], vec![]).await.json()["grants"], json!([]));
+
+    // An empty repository can be deleted the confirmed way, and is gone everywhere.
+    delete_repository_confirmed(&app, &cat, "acme/empty").await;
+    assert_eq!(send(&app, Method::GET, "/api/v1/repositories/acme/empty", &[("cookie", &ann)], vec![]).await.status, StatusCode::NOT_FOUND);
+    let r = send(&app, Method::GET, "/api/v1/repositories", &[("cookie", &ann)], vec![]).await;
+    assert!(!r.json().as_array().unwrap().iter().any(|e| e["name"] == "acme/empty"));
+    // Audited.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let r = send(&app, Method::GET, "/api/v1/logs?repository=acme/svc&limit=50", &[("cookie", &root)], vec![]).await;
+    assert!(String::from_utf8_lossy(&r.body).contains("repository_created"), "{}", String::from_utf8_lossy(&r.body));
+}
+
+/// A repository created empty gets a build trigger at once, and its first build pushes its tags.
+#[tokio::test]
+async fn building_into_an_empty_repository() {
+    let mut cfg = base_config();
+    cfg.builds.is_enabled = true;
+    cfg.builds.runners = vec![kontainer_core::config::ConfigRunner { name: "ci".into(), token: "agent-token-0123456789".into(), namespaces: vec![] }];
+    let app = app(cfg).await;
+    let jh = ("content-type", "application/json");
+
+    // An exported image to stand in for the build's result.
+    let cfg_blob = br#"{"architecture":"amd64","os":"linux"}"#;
+    let layer = gzip_tar_layer();
+    let cd = push_blob(&app, "acme/src", cfg_blob, None).await;
+    let ld = push_blob(&app, "acme/src", &layer, None).await;
+    let r = send(&app, Method::PUT, "/v2/acme/src/manifests/v1", &[("content-type", OCI_MANIFEST)], image_manifest(&cd, cfg_blob.len(), &[(ld, layer.len())])).await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    let archive = send(&app, Method::GET, "/api/v1/repositories/acme/src/manifests/v1/export", &[], vec![]).await.body;
+
+    let r = send(&app, Method::POST, "/api/v1/repositories", &[jh], br#"{"name":"acme/hello"}"#.to_vec()).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&r.body));
+    assert_eq!(r.json()["builds"], true, "a runner serves acme");
+    assert_eq!(send(&app, Method::GET, "/v2/acme/hello/tags/list", &[], vec![]).await.status, StatusCode::NOT_FOUND);
+
+    let body = json!({ "repository": "acme/hello", "name": "main", "git_url": "https://git.example.com/acme/hello.git", "branches": ["main"], "tags": ["latest", "{sha7}"] });
+    let r = send(&app, Method::POST, "/api/v1/build-triggers", &[jh], serde_json::to_vec(&body).unwrap()).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&r.body));
+    let trigger = r.json()["id"].as_i64().unwrap();
+    let r = send(&app, Method::GET, "/api/v1/build-triggers?repository=acme/hello", &[], vec![]).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json().as_array().unwrap().iter().map(|t| t["id"].as_i64().unwrap()).collect::<Vec<_>>(), vec![trigger]);
+
+    // Run it the way a runner does: claim, commit, hand back the image.
+    let build = send(&app, Method::POST, &format!("/api/v1/build-triggers/{trigger}/run"), &[jh], b"{}".to_vec()).await.json()["build"].as_i64().unwrap();
+    let r = send(&app, Method::POST, "/api/v1/runner/claim", &[jh, ("authorization", "Bearer agent-token-0123456789")], br#"{"hostname":"ci-1"}"#.to_vec()).await;
+    assert_eq!(r.json()["id"], build);
+    let bt = format!("Bearer {}", r.json()["token"].as_str().unwrap());
+    let ba = ("authorization", bt.as_str());
+    let sha = "0123456789abcdef0123456789abcdef01234567";
+    let r = send(&app, Method::POST, &format!("/api/v1/runner/builds/{build}/commit"), &[jh, ba], serde_json::to_vec(&json!({ "sha": sha })).unwrap()).await;
+    assert_eq!(r.json()["tags"], json!(["latest", "0123456"]));
+    let r = send(&app, Method::PUT, &format!("/api/v1/runner/builds/{build}/image"), &[ba, ("content-type", "application/x-tar")], archive.to_vec()).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", String::from_utf8_lossy(&r.body));
+    assert_eq!(send(&app, Method::GET, &format!("/api/v1/builds/{build}"), &[], vec![]).await.json()["status"], "succeeded");
+
+    // Its tags are there, as after a push.
+    let r = send(&app, Method::GET, "/v2/acme/hello/tags/list", &[], vec![]).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json()["tags"], json!(["0123456", "latest"]));
+    let r = send(&app, Method::GET, "/api/v1/repositories/acme/hello", &[], vec![]).await;
+    assert_eq!(r.json()["tags"], 2);
+    let r = send(&app, Method::GET, "/api/v1/repositories/acme/hello/tags", &[], vec![]).await;
+    let mut tags: Vec<String> = r.json().as_array().unwrap().iter().map(|t| t["tag"].as_str().unwrap().to_string()).collect();
+    tags.sort();
+    assert_eq!(tags, ["0123456", "latest"]);
+    let r = send(&app, Method::GET, "/api/v1/repositories", &[], vec![]).await;
+    let names: Vec<String> = r.json().as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap().to_string()).collect();
+    assert_eq!(names, ["acme/hello", "acme/src"], "listed once");
+}

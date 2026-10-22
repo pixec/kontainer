@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { Link, useNavigate } from "react-router"
-import { BoxIcon, CopyIcon, DownloadIcon, EllipsisIcon, ExternalLinkIcon, SettingsIcon } from "lucide-react"
+import { BoxIcon, CopyIcon, DownloadIcon, EllipsisIcon, ExternalLinkIcon, PlusIcon, SettingsIcon } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -14,6 +14,7 @@ import { useScope } from "@/lib/scope"
 import { StarToggle } from "@/components/star-button"
 import { useSession } from "@/lib/session"
 import { ImportDialog } from "@/components/import-dialog"
+import { NewRepositoryDialog } from "@/components/new-repository-dialog"
 import { originLabel } from "@/components/repo-origin"
 import { Button } from "@/components/ui/button"
 import type { RepoSummary } from "@/lib/api"
@@ -40,6 +41,7 @@ export function RepositoriesPage() {
   const { me } = useSession()
   const navigate = useNavigate()
   const [importing, setImporting] = useState(false)
+  const [creating, setCreating] = useState(false)
   const [type, setType] = useState<RepoType>("all")
   const [sort, setSort] = useState<Sort>("updated")
   if (q.error) return <ErrorBox error={q.error} />
@@ -54,10 +56,11 @@ export function RepositoriesPage() {
     <>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <SearchInput className="w-full sm:flex-1" placeholder={<>Find a repository in <span className="mx-1 font-mono text-foreground/70">{ns}</span> namespace</>} label={`Find a repository in ${ns} namespace`} value={filter} onChange={setFilter} />
-        <div className="grid grid-cols-[1fr_1fr_auto] gap-2 sm:flex">
+        <div className="grid grid-cols-[1fr_1fr_auto_auto] gap-2 sm:flex">
           <LabeledSelect label="Type" value={type} onChange={setType} options={types.map((t) => [t, TYPES[t]] as [RepoType, string])} className="w-full sm:w-auto" />
           <LabeledSelect label="Sort" value={sort} onChange={setSort} options={SORTS} className="w-full sm:w-auto" />
           {me?.username && <Button variant="outline" size="lg" onClick={() => setImporting(true)} aria-label="Import"><DownloadIcon /><span className="hidden sm:inline">Import</span></Button>}
+          {me?.username && <Button size="lg" onClick={() => setCreating(true)} aria-label="New repository"><PlusIcon /><span className="hidden sm:inline">New repository</span></Button>}
         </div>
       </div>
       {filtered && (
@@ -67,6 +70,7 @@ export function RepositoriesPage() {
         </div>
       )}
       {me?.username && <ImportDialog namespace={scope.kind === "personal" ? me.username : scope.name} open={importing} onOpenChange={setImporting} />}
+      {me?.username && <NewRepositoryDialog key={ns} namespace={ns} open={creating} onOpenChange={setCreating} />}
       <Table>
         <TableHeader>
           <TableRow>
@@ -94,7 +98,7 @@ export function RepositoriesPage() {
           ))}
           {q.data && repos.length === 0 && (
             <TableRow className="hover:bg-transparent"><TableCell colSpan={5} className="whitespace-normal">
-              <Empty>No repositories{filtered ? " match" : " yet"}.{!filtered && <> Push one with <code className="font-mono text-xs">docker push {location.host}/{pushHint}:tag</code></>}</Empty>
+              <Empty>No repositories{filtered ? " match" : " yet"}.{!filtered && <> Push one with <code className="font-mono text-xs">docker push {location.host}/{pushHint}:tag</code>{me?.username && <>, or <button type="button" className="text-foreground hover:underline" onClick={() => setCreating(true)}>create an empty one</button> to build from Git</>}.</>}</Empty>
             </TableCell></TableRow>
           )}
           {repos.map((r) => (

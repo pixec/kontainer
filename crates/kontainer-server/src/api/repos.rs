@@ -22,6 +22,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/explore", get(explore))
         .route("/api/v1/search", get(search))
+        .route("/api/v1/repositories", axum::routing::post(create_repository))
         .route("/api/v1/repository-meta/{*name}", get(get_meta).patch(update_meta))
         .route("/api/v1/repository-permissions/{*name}", get(get_permissions).put(set_permission))
         .route("/api/v1/directory", get(directory))
@@ -249,9 +250,7 @@ async fn update_meta(State(state): State<AppState>, Extension(p): Extension<Prin
         require(&state, &p, Action::Visibility, &name)?;
     }
     if let Some(t) = &body.topics {
-        if t.len() > 20 || t.iter().any(|x| x.is_empty() || x.len() > 32 || !x.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')) {
-            return Err(RegistryError::bad_request("topics: up to 20 of lowercase letters, digits and `-`"));
-        }
+        validate_topics(t)?;
     }
     if body.readme.as_ref().is_some_and(|r| r.len() > 256 * 1024) {
         return Err(RegistryError::bad_request("readme too large (256 KiB max)"));
@@ -260,12 +259,87 @@ async fn update_meta(State(state): State<AppState>, Extension(p): Extension<Prin
     state.auth.refresh_public_repos().await?;
     state.reindex(&name).await;
     state.audit.record(&p, "repository_updated", Some(&name), None, None, body.visibility.map(|v| format!("visibility={v:?}").to_lowercase()));
-    let (stars, is_starred) = star_state(&state, &p, &name).await?;
-    let origin = origin(&state, &name).await?;
-    let owner = owner(&state, &name).await?;
+    Ok(Json(meta_view(&state, &p, meta).await?).into_response())
+}
+
+/// The `GET /api/v1/repository-meta/{name}` view of a stored catalogue entry.
+async fn meta_view(state: &AppState, p: &Principal, meta: RepoMeta) -> Result<MetaView> {
+    let name = meta.name.clone();
+    let (stars, is_starred) = star_state(state, p, &name).await?;
+    let origin = origin(state, &name).await?;
+    let owner = owner(state, &name).await?;
     let repo_state = state.auth.db.repo_state(&name).await?;
-    let builds = builds_available(&state, &name).await?;
-    Ok(Json(MetaView { actions: p.actions_on(&name), meta, stars, is_starred, origin, owner, state: repo_state, builds }).into_response())
+    let builds = builds_available(state, &name).await?;
+    Ok(MetaView { actions: p.actions_on(&name), meta, stars, is_starred, origin, owner, state: repo_state, builds })
+}
+
+fn validate_topics(t: &[String]) -> Result<()> {
+    if t.len() > 20 || t.iter().any(|x| x.is_empty() || x.len() > 32 || !x.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')) {
+        return Err(RegistryError::bad_request("topics: up to 20 of lowercase letters, digits and `-`"));
+    }
+    Ok(())
+}
+
+#[derive(Deserialize)]
+struct CreateRepository {
+    name: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    visibility: Option<Visibility>,
+    #[serde(default)]
+    topics: Vec<String>,
+}
+
+/// `POST /api/v1/repositories`: create an empty repository, so it can be set up (a build
+/// trigger, permissions, a README) before anything is pushed. Whoever may push a repository
+/// into existence may create it here, and a Creator team member becomes its admin, as with a
+/// first push. 201 with the `repository-meta` view; 409 if it already exists.
+async fn create_repository(State(state): State<AppState>, Extension(p): Extension<Principal>, Json(body): Json<CreateRepository>) -> Result<Response> {
+    let name = body.name.trim().to_string();
+    if !names::is_valid_repository(&name) {
+        return Err(RegistryError::new(Code::NameInvalid).detail(serde_json::json!({ "name": name })));
+    }
+    validate_topics(&body.topics)?;
+    let ns = names::namespace(&name);
+    if name.contains('/') && state.auth.proxies_contains(ns).await {
+        return Err(RegistryError::bad_request(format!("{ns} is a pull-through cache; its repositories come from the upstream")));
+    }
+    // The first push's rule: decided on what storage and the catalogue hold now (see
+    // `confirm_new_repo`), so an existing repository is never passed off as new.
+    let mut p = p;
+    state.auth.confirm_new_repo(&mut p, &name).await?;
+    if state.repository_known(&name).await? {
+        if p.can_see(&name) {
+            return Err(RegistryError::conflict(format!("repository {name} already exists")));
+        }
+        return Err(state.auth.denied(&p, Some(format!("repository:{name}:pull,push"))));
+    }
+    require(&state, &p, Action::Push, &name)?;
+    let visibility = body.visibility.unwrap_or(Visibility::Private);
+    // Making it public takes the visibility right, which a Creator gets with the admin grant.
+    if visibility == Visibility::Public && !p.creates(&name) && !p.allowed(Action::Visibility, &name) {
+        return Err(state.auth.denied(&p, None));
+    }
+    let Some(meta) = state.auth.db.create_repo_meta(&name, body.description.trim(), visibility, &body.topics).await? else {
+        return Err(RegistryError::conflict(format!("repository {name} already exists")));
+    };
+    // Grant before the repository counts as existing: `creates` asks whether it does.
+    if state.auth.grant_creator(&p, &name).await? {
+        let mut grants = (*p.repo_grants).clone();
+        grants.insert(name.clone(), kontainer_core::perm::Level::ADMIN);
+        p.repo_grants = std::sync::Arc::new(grants);
+    }
+    state.auth.note_repo(&name, true).await;
+    let mut known = (*p.known_repos).clone();
+    known.insert(name.clone());
+    p.known_repos = std::sync::Arc::new(known);
+    if visibility == Visibility::Public {
+        state.auth.refresh_public_repos().await?;
+    }
+    state.reindex(&name).await;
+    state.audit.record(&p, "repository_created", Some(&name), None, None, Some(format!("visibility={visibility:?}").to_lowercase()));
+    Ok((axum::http::StatusCode::CREATED, Json(meta_view(&state, &p, meta).await?)).into_response())
 }
 
 async fn star_state(state: &AppState, p: &Principal, name: &str) -> Result<(i64, bool)> {
@@ -318,7 +392,7 @@ async fn list_stars(State(state): State<AppState>, Extension(p): Extension<Princ
     let uid = require_user(&state, &p)?;
     let db = &state.auth.db;
     let counts = db.star_counts().await?;
-    let existing = state.storage.list_repositories().await?;
+    let existing = state.repository_names().await?;
     let mut out = vec![];
     for name in db.starred_by(uid).await? {
         if !existing.contains(&name) || !p.allowed(Action::Pull, &name) {
@@ -595,7 +669,7 @@ pub struct RepoDeletePreview {
 
 async fn repo_preview(state: &AppState, name: &str) -> Result<RepoDeletePreview> {
     let db = &state.auth.db;
-    if !state.storage.repository_exists(name).await? {
+    if !state.repository_known(name).await? {
         return Err(RegistryError::new(Code::NameUnknown));
     }
     let tags = state.storage.list_tags(name).await?;

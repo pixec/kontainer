@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState, type ReactNode } from "react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router"
-import { BookOpenIcon, HammerIcon, Trash2Icon, ListChecksIcon, HistoryIcon, HourglassIcon, HashIcon, InfoIcon, TerminalIcon, WaypointsIcon, ChevronDownIcon, ChevronUpIcon, CpuIcon, GitCompareIcon, GlobeIcon, LockIcon, SettingsIcon, TagIcon, UsersIcon } from "lucide-react"
+import { BookOpenIcon, BoxIcon, HammerIcon, Trash2Icon, ListChecksIcon, HistoryIcon, HourglassIcon, HashIcon, InfoIcon, TerminalIcon, WaypointsIcon, ChevronDownIcon, ChevronUpIcon, CpuIcon, GitCompareIcon, GlobeIcon, LockIcon, SettingsIcon, TagIcon, UsersIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -19,7 +19,7 @@ import { RepoPermissions } from "@/components/repo-permissions"
 import { OriginDetails } from "@/components/repo-origin"
 import { BuildsPanel, BuildTriggersSection } from "@/components/builds"
 import { ExpirationDialog, ExpiryChip, RepoStateBanner, RepoStateSection, TagHistoryPanel } from "@/components/tag-history"
-import { UseSnippets } from "@/components/use-snippets"
+import { CodeBlock, UseSnippets } from "@/components/use-snippets"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorBox, Mono } from "@/components/ui-bits"
@@ -35,9 +35,10 @@ export function RepositoryPage() {
     queryFn: () => endpoints.tags(name),
     refetchInterval: (query) => (query.state.data?.some((t) => t.scan && (t.scan.status === "pending" || t.scan.status === "running")) ? 3000 : false),
   })
-  const repos = useQuery({ queryKey: ["repositories"], queryFn: endpoints.repositories })
-  const canDelete = me?.features.delete && repos.data?.find((r) => r.name === name)?.actions.includes("delete_repository")
-  const canPush = !!repos.data?.find((r) => r.name === name)?.actions.includes("push")
+  // Under ["repositories"], so whatever refreshes the listing refreshes this too.
+  const repo = useQuery({ queryKey: ["repositories", name], queryFn: () => endpoints.repository(name) })
+  const canDelete = me?.features.delete && repo.data?.actions.includes("delete_repository")
+  const canPush = !!repo.data?.actions.includes("push")
   // Deleting: the repository, or the tags in `deleting` (one from its card, or the bulk selection).
   const [deletingRepo, setDeletingRepo] = useState(false)
   const [deleting, setDeleting] = useState<string[] | null>(null)
@@ -51,6 +52,7 @@ export function RepositoryPage() {
   const [params, setParams] = useSearchParams()
   // The header and tabs render at once (the name is in the URL); only what is loading waits.
   if (q.error) return <ErrorBox error={q.error} />
+  if (repo.error) return <ErrorBox error={repo.error} />
   const m = meta.data
   // cosign `sha256-<hex>.sig|.att|.sbom` tags are attachments; they are shown on their image instead.
   const attachedTags = (q.data ?? []).filter((t) => t.attached_to).length
@@ -99,6 +101,14 @@ export function RepositoryPage() {
     </aside>
   )
   const can = (a: Action) => !!m?.actions.includes(a)
+  // Created empty (or every tag deleted): how to put something in it.
+  const isEmpty = q.data?.length === 0
+  const addingTrigger = params.get("trigger") === "new"
+  const setAddingTrigger = (v: boolean) => setParams(v ? { tab: "builds", trigger: "new" } : { tab: "builds" }, { replace: true })
+  const emptyState = m && (
+    <EmptyRepository name={name} canPush={canPush && !m.state}
+      onBuild={m.builds && can("builds") && !m.state ? () => setAddingTrigger(true) : undefined} />
+  )
   const canDeleteTags = !!me?.features.delete && can("delete") && !m?.state
   const showSettings = SETTINGS_ACTIONS.some((a) => a !== "delete_repository" && can(a)) || !!canDelete
 
@@ -123,7 +133,8 @@ export function RepositoryPage() {
         </TabsList>
         <TabsContent value="overview">
           <div className="flex flex-col gap-6 lg:flex-row">
-            <div className="flex min-w-0 flex-1 flex-col">
+            <div className="flex min-w-0 flex-1 flex-col gap-6">
+              {isEmpty && emptyState}
               <div className="flex flex-1 flex-col">
                 <Panel id="readme" icon={<BookOpenIcon />} title="README" className="min-h-64 flex-1">
                   {!m ? <ReadmePlaceholder /> : m.readme.trim() ? <div className="px-6 py-5"><Markdown source={m.readme} /></div> : <Empty>No README yet.{can("metadata") && " Add one in Settings."}</Empty>}
@@ -157,7 +168,7 @@ export function RepositoryPage() {
               )}
             </div>
             {q.isLoading && <TagCardPlaceholder />}
-            {q.data && tags.length === 0 && <Panel><Empty>No tags{filter ? " match" : " yet"}.</Empty></Panel>}
+            {isEmpty ? emptyState : q.data && tags.length === 0 && <Panel><Empty>No tags{filter ? " match" : " yet"}.</Empty></Panel>}
             {tags.map((t) => <TagCard key={t.tag} name={name} tag={t} canEdit={canPush && !m?.state}
               onDelete={canDeleteTags ? () => setDeleting([t.tag]) : undefined}
               selected={selecting ? selected.includes(t.tag) : undefined} onSelect={() => toggle(t.tag)} selectDisabled={!selected.includes(t.tag) && selected.length >= MAX_BULK_TAGS} />)}
@@ -165,7 +176,7 @@ export function RepositoryPage() {
           </div>
         </TabsContent>
         <TabsContent value="history"><TagHistoryPanel repo={name} /></TabsContent>
-        {m?.builds && <TabsContent value="builds"><BuildsPanel repo={name} canPush={canPush} /></TabsContent>}
+        {m?.builds && <TabsContent value="builds"><BuildsPanel repo={name} canPush={canPush} canManage={can("builds") && !m.state} addingTrigger={addingTrigger} onAddingTriggerChange={setAddingTrigger} /></TabsContent>}
         {can("permissions") && <TabsContent value="permissions"><RepoPermissions name={name} /></TabsContent>}
         {showSettings && (
           <TabsContent value="settings">
@@ -185,6 +196,35 @@ export function RepositoryPage() {
         )}
       </Tabs>
     </>
+  )
+}
+
+/** A repository with no tags: the push commands, and a build from Git when one can be set up. */
+function EmptyRepository({ name, canPush, onBuild }: { name: string; canPush: boolean; onBuild?: () => void }) {
+  const host = location.host
+  if (!canPush && !onBuild) return <Panel><Empty>This repository is empty. Nothing has been pushed yet.</Empty></Panel>
+  return (
+    <Panel padded icon={<BoxIcon />} title="This repository is empty" description="Push an image to it, or build one from a Git repository.">
+      <div className="space-y-4">
+        {canPush && (
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Push an image</p>
+            <CodeBlock code={`docker login ${host}
+docker tag <image> ${host}/${name}:latest
+docker push ${host}/${name}:latest`} />
+          </div>
+        )}
+        {onBuild && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Build from Git</p>
+              <p className="text-sm text-muted-foreground">Build a Git repository's Dockerfile into {name} whenever it changes.</p>
+            </div>
+            <Button onClick={onBuild}><HammerIcon />Set up a build from Git</Button>
+          </div>
+        )}
+      </div>
+    </Panel>
   )
 }
 

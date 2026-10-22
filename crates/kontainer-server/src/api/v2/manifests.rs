@@ -296,11 +296,7 @@ pub async fn put(ctx: Ctx, reference: String, body: Body) -> Result<Response> {
     }
     // First manifest in a repository: remember it exists, and a Creator team member
     // who pushed it into existence becomes its admin.
-    if ctx.principal.creates(&ctx.name) {
-        if let Some(uid) = ctx.principal.user_id {
-            ctx.state.auth.db.set_user_grant(&ctx.name, uid, Some(kontainer_core::perm::Level::ADMIN)).await?;
-        }
-    }
+    ctx.state.auth.grant_creator(&ctx.principal, &ctx.name).await?;
     ctx.state.auth.note_repo(&ctx.name, true).await;
     ctx.state.reindex(&ctx.name).await;
     ctx.state.webhooks.fire(Event::push(&ctx.name, tag.as_deref(), &digest, &media_type, ctx.principal.name()));

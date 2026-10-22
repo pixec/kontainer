@@ -75,6 +75,51 @@ impl Db {
         Ok(sqlx::query_scalar("SELECT name FROM repositories WHERE visibility = 'public' ORDER BY name").fetch_all(&self.pool).await?)
     }
 
+    /// Names of every catalogue entry, sorted. With the repositories in storage, these are the
+    /// repositories that exist: one created empty (`POST /api/v1/repositories`) has only this.
+    pub async fn catalogue_names(&self) -> Result<Vec<String>> {
+        Ok(sqlx::query_scalar("SELECT name FROM repositories ORDER BY name").fetch_all(&self.pool).await?)
+    }
+
+    pub async fn in_catalogue(&self, name: &str) -> Result<bool> {
+        Ok(sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM repositories WHERE name = $1)").bind(name).fetch_one(&self.pool).await?)
+    }
+
+    /// Whether the catalogue has an entry named `namespace` or under `<namespace>/`.
+    pub async fn catalogue_has_namespace(&self, namespace: &str) -> Result<bool> {
+        Ok(sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM repositories WHERE name = $1 OR substr(name, 1, $2::int) = $3)")
+            .bind(namespace)
+            .bind(namespace.len() as i64 + 1)
+            .bind(format!("{namespace}/"))
+            .fetch_one(&self.pool)
+            .await?)
+    }
+
+    /// Add a catalogue entry for a new repository; `None` when one already exists (it is left
+    /// as it was).
+    pub async fn create_repo_meta(&self, name: &str, description: &str, visibility: Visibility, topics: &[String]) -> Result<Option<RepoMeta>> {
+        let topics = serde_json::to_string(topics).unwrap_or_else(|_| "[]".into());
+        let created = sqlx::query(
+            "INSERT INTO repositories(name, description, readme, visibility, topics, created_at, updated_at)
+             VALUES ($1, $2, '', $3, $4, $5, $5) ON CONFLICT(name) DO NOTHING",
+        )
+        .bind(name)
+        .bind(description)
+        .bind(visibility)
+        .bind(topics)
+        .bind(now())
+        .execute(&self.pool)
+        .await?
+        .rows_affected()
+            == 1;
+        if !created {
+            return Ok(None);
+        }
+        // A new repository, perhaps public: other instances' caches and search indexes follow.
+        self.notify(&super::notify::Topic::Repo(name.to_string())).await;
+        self.repo_meta(name).await
+    }
+
     /// Create or update the catalogue entry; unspecified fields are kept.
     pub async fn upsert_repo_meta(&self, name: &str, u: &RepoMetaUpdate, default_visibility: Visibility) -> Result<RepoMeta> {
         let topics = u.topics.as_ref().map(|t| serde_json::to_string(t).unwrap_or_else(|_| "[]".into()));

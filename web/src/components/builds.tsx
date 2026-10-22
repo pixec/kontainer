@@ -191,20 +191,39 @@ function BuildActor({ build: b }: { build: Build }) {
 }
 
 /** Repository → Builds tab. */
-export function BuildsPanel({ repo, canPush }: { repo: string; canPush: boolean }) {
+/** The Builds tab. `canManage` (the `builds` action) offers adding the first trigger here;
+ *  `addingTrigger` / `onAddingTriggerChange` let the page open that dialog (an empty
+ *  repository's "Set up a build from Git"). */
+export function BuildsPanel({ repo, canPush, canManage, addingTrigger, onAddingTriggerChange }: { repo: string; canPush: boolean; canManage?: boolean; addingTrigger?: boolean; onAddingTriggerChange?: (v: boolean) => void }) {
   const triggers = useQuery({ queryKey: ["build-triggers", repo], queryFn: () => endpoints.buildTriggers(repo) })
   const builds = useQuery({ queryKey: ["builds", repo], queryFn: () => endpoints.builds(repo), refetchInterval: (s) => (s.state.data?.some(active) ? 2000 : 15000) })
   const [open, setOpen] = useState<number | null>(null)
   const [starting, setStarting] = useState(false)
+  const [localAdding, setLocalAdding] = useState(false)
+  const adding = addingTrigger ?? localAdding
+  const setAdding = onAddingTriggerChange ?? setLocalAdding
+  const [secret, setSecret] = useState<{ secret: string; url: string } | null>(null)
   const list = builds.data ?? []
   const hasTriggers = (triggers.data?.length ?? 0) > 0
+  const addTrigger = canManage && triggers.isSuccess && !hasTriggers
   return (
     <div className="space-y-4">
-      <Panel icon={<HammerIcon />} title="Builds" actions={canPush && hasTriggers && <Button size="sm" onClick={() => setStarting(true)}><PlayIcon />Start build</Button>}>
+      {secret && (
+        <Panel padded icon={<HammerIcon />} title="Build trigger created" description="Point the Git host's push webhook here, or let it poll on its schedule. Change it under Settings.">
+          <div className="space-y-3">
+            <CopyField label="Webhook URL" value={secret.url} />
+            <Secret label="Webhook secret" value={secret.secret} hint="Copy it now: it is not shown again." />
+          </div>
+        </Panel>
+      )}
+      <Panel icon={<HammerIcon />} title="Builds" actions={<>
+        {addTrigger && <Button size="sm" variant="outline" onClick={() => setAdding(true)}><PlusIcon />Add build trigger</Button>}
+        {canPush && hasTriggers && <Button size="sm" onClick={() => setStarting(true)}><PlayIcon />Start build</Button>}
+      </>}>
         {builds.isLoading && <div className="p-4"><Loading rows={3} /></div>}
         {builds.error && <div className="p-4"><ErrorBox error={builds.error} /></div>}
         {builds.data && list.length === 0 && (
-          <Empty>{hasTriggers ? "No builds yet. Push to the Git repository or start one." : <>Add a build trigger under Settings to build this repository from Git.</>}</Empty>
+          <Empty>{hasTriggers ? "No builds yet. Push to the Git repository or start one." : addTrigger ? "Add a build trigger to build this repository from a Git repository's Dockerfile." : <>Add a build trigger under Settings to build this repository from Git.</>}</Empty>
         )}
         <ul className="divide-y">
           {list.map((b) => (
@@ -230,6 +249,7 @@ export function BuildsPanel({ repo, canPush }: { repo: string; canPush: boolean 
         </ul>
       </Panel>
       {starting && triggers.data && <StartBuildDialog triggers={triggers.data} builds={list} onClose={() => setStarting(false)} onStarted={(id) => { setOpen(id); builds.refetch() }} />}
+      {adding && <TriggerDialog repo={repo} trigger={null} onClose={() => setAdding(false)} onCreated={setSecret} />}
     </div>
   )
 }

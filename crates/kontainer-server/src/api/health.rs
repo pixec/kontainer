@@ -103,7 +103,7 @@ async fn report(State(state): State<AppState>, Extension(p): Extension<Principal
     }
 
     let indexed = state.search.len() as usize;
-    let repos = state.storage.list_repositories().await.map(|r| r.len()).unwrap_or(indexed);
+    let repos = state.repository_names().await.map(|r| r.len()).unwrap_or(indexed);
     checks.push(Check {
         name: "Search index".into(),
         group: "core",

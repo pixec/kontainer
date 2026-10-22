@@ -47,35 +47,65 @@ struct RepoSummary {
     origin: Option<crate::api::repos::Origin>,
 }
 
-async fn list_repositories(State(state): State<AppState>, Extension(p): Extension<Principal>) -> Result<Json<Vec<RepoSummary>>> {
-    let mut out = vec![];
-    let counts = state.auth.db.star_counts().await?;
-    let starred = match p.user_id {
-        Some(uid) => state.auth.db.starred_by(uid).await?,
-        None => vec![],
-    };
-    let origins = crate::api::repos::Origins::load(&state.auth.db).await?;
-    for name in state.storage.list_repositories().await? {
-        if !p.can_see(&name) {
-            continue;
-        }
+/// What a listing needs about every repository, loaded once.
+struct ListingContext {
+    stars: HashMap<String, i64>,
+    starred: Vec<String>,
+    origins: crate::api::repos::Origins,
+}
+
+impl ListingContext {
+    async fn load(state: &AppState, p: &Principal) -> Result<Self> {
+        let starred = match p.user_id {
+            Some(uid) => state.auth.db.starred_by(uid).await?,
+            None => vec![],
+        };
+        Ok(Self { stars: state.auth.db.star_counts().await?, starred, origins: crate::api::repos::Origins::load(&state.auth.db).await? })
+    }
+
+    async fn summary(&self, state: &AppState, p: &Principal, name: String) -> Result<RepoSummary> {
         let (tags, pushed) = state.storage.tag_summary(&name).await?;
         let meta = state.auth.db.repo_meta(&name).await?;
-        out.push(RepoSummary {
+        Ok(RepoSummary {
             actions: p.actions_on(&name),
             visibility: meta.as_ref().map(|m| m.visibility).unwrap_or(crate::database::Visibility::Private),
             description: meta.as_ref().map(|m| m.description.clone()).unwrap_or_default(),
             topics: meta.as_ref().map(|m| m.topic_list()).unwrap_or_default(),
             // Last push; the catalogue entry's own timestamp only if nothing is tagged.
             updated_at: pushed.or(meta.map(|m| m.updated_at)).map(|t| t.to_rfc3339()),
-            stars: counts.get(&name).copied().unwrap_or(0),
-            is_starred: starred.contains(&name),
-            origin: origins.get(&name),
+            stars: self.stars.get(&name).copied().unwrap_or(0),
+            is_starred: self.starred.contains(&name),
+            origin: self.origins.get(&name),
             name,
             tags,
-        });
+        })
+    }
+}
+
+/// Every repository the caller can see, including ones created empty (`tags: 0`).
+async fn list_repositories(State(state): State<AppState>, Extension(p): Extension<Principal>) -> Result<Json<Vec<RepoSummary>>> {
+    let ctx = ListingContext::load(&state, &p).await?;
+    let mut out = vec![];
+    for name in state.repository_names().await? {
+        if !p.can_see(&name) {
+            continue;
+        }
+        out.push(ctx.summary(&state, &p, name).await?);
     }
     Ok(Json(out))
+}
+
+/// `GET /api/v1/repositories/{name}`: one repository's summary, as the listing has it. A
+/// repository created empty is there with `tags: 0`.
+async fn repository(state: AppState, p: Principal, name: String) -> Result<Response> {
+    if !p.can_see(&name) {
+        return Err(state.auth.denied(&p, Some(format!("repository:{name}:pull"))));
+    }
+    if !state.repository_known(&name).await? {
+        return Err(RegistryError::new(Code::NameUnknown).detail(serde_json::json!({ "name": name })));
+    }
+    let ctx = ListingContext::load(&state, &p).await?;
+    Ok(Json(ctx.summary(&state, &p, name).await?).into_response())
 }
 
 enum Route {
@@ -181,6 +211,7 @@ async fn dispatch(
         (Route::Expiration(t), Method::PUT) => history::set_expiration(state, principal, name, t, &body).await,
         (Route::State, Method::GET) => history::repo_state(state, principal, name, None).await,
         (Route::State, Method::PUT) => history::repo_state(state, principal, name, Some(&body)).await,
+        (Route::Repo, Method::GET) => repository(state, principal, name).await,
         (Route::Repo, Method::DELETE) => delete_repo(state, principal, name).await,
         (Route::DeletePreview, Method::GET) => crate::api::repos::repo_delete_preview(state, principal, name).await,
         (Route::TagDeletePreview(t), Method::GET) => crate::api::repos::tag_delete_preview(state, principal, name, t).await,

@@ -67,7 +67,8 @@ pub async fn build_state(cfg: Config) -> Result<AppState> {
     if migrated > 0 {
         tracing::info!(teams = migrated, "converted legacy team rules into base permissions and repository grants");
     }
-    auth.set_known_repos(repos).await;
+    // Repositories created empty exist too.
+    auth.set_known_repos(repos.into_iter().chain(auth.db.catalogue_names().await.context("listing the catalogue")?)).await;
     auth.set_storage(storage.clone());
     let search = Arc::new(crate::search::SearchIndex::new().context("creating the search index")?);
     let state = AppState { auth, config: Arc::new(cfg), storage, scans, webhooks, audit, search, usage: Arc::default(), usage_running: Arc::default(), jobs: Arc::default(), signed: Default::default(), running: Default::default(), proxy: Default::default(), build_logs: Arc::default() };

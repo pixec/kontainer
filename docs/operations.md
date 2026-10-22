@@ -50,6 +50,21 @@ the same choices are under a namespace's **Settings → Storage → Change quota
 Checking a quota scans the namespace's manifests, so very large namespaces pay a small cost
 on every push.
 
+## Creating a repository
+
+A push creates a repository with its first manifest. To set one up first (a build trigger,
+permissions, a README), create it empty: **New repository** on the repositories page or an
+organization's, or `POST /api/v1/repositories` with `{"name": "acme/app"}` and optionally
+`description`, `visibility` (`private` by default) and `topics`. Whoever may push a repository
+into existence may create it (their own namespace, a Creator team in the organization, org
+admins and superusers), and a Creator team member becomes its admin, as after a first push.
+It answers `201` with the `repository-meta` view, `409` if the repository already has a
+catalogue entry or manifests, and is audited as `repository_created`. An empty repository is
+listed (with no tags) on the repositories page, `/v2/_catalog`, Explore and search, and is
+taken: other Creator team members can no longer push it into existence. Its OCI tag list
+(`/v2/<name>/tags/list`) stays `NAME_UNKNOWN` until something is pushed or built. Delete it
+like any other repository.
+
 ## Deleting images
 
 Deleting is guarded. The UI shows what a delete would take with it before asking for the

@@ -277,6 +277,10 @@ const enc = (s: string) => s.split("/").map(encodeURIComponent).join("/")
 export const endpoints = {
   me: () => api<Me>("/api/v1/me"),
   repositories: () => api<RepoSummary[]>("/api/v1/repositories"),
+  /** One repository's listing entry; one created empty has `tags: 0`. */
+  repository: (name: string) => api<RepoSummary>(`/api/v1/repositories/${enc(name)}`),
+  /** Create an empty repository (to set up builds, permissions or a README before a push). */
+  createRepository: (r: { name: string; description?: string; visibility?: Visibility; topics?: string[] }) => post<RepoMeta>("/api/v1/repositories", r),
   tags: (repo: string) => api<TagInfo[]>(`/api/v1/repositories/${enc(repo)}/tags`),
   manifest: (repo: string, ref: string) => api<ManifestDetail>(`/api/v1/repositories/${enc(repo)}/manifests/${encodeURIComponent(ref)}`),
   sbom: (repo: string, ref: string) => api<SbomView>(`/api/v1/repositories/${enc(repo)}/manifests/${encodeURIComponent(ref)}/sbom`),
