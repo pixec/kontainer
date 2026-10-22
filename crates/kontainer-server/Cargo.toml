@@ -1,0 +1,60 @@
+[package]
+name = "kontainer-server"
+description = "Kontainer: an OCI container registry with pluggable storage, accounts, RBAC, scanning and a layer-inspection UI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+build = "build.rs"
+
+[features]
+# `database::test_support`: throwaway PostgreSQL databases, for this crate's integration tests.
+test-support = []
+
+[dependencies]
+kontainer-core.workspace = true
+kontainer-store.workspace = true
+anyhow.workspace = true
+argon2.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+base64.workspace = true
+bcrypt.workspace = true
+bollard.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+futures.workspace = true
+hex.workspace = true
+hmac.workspace = true
+http-body-util.workspace = true
+jsonwebtoken.workspace = true
+ldap3.workspace = true
+mime_guess.workspace = true
+object_store.workspace = true
+qrcode.workspace = true
+reqwest.workspace = true
+rust-embed.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+tantivy.workspace = true
+tar.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+totp-rs.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+url.workspace = true
+uuid.workspace = true
+webauthn-rs.workspace = true
+
+[dev-dependencies]
+kontainer-server = { path = ".", features = ["test-support"] }
+flate2.workspace = true
+p256.workspace = true
+tempfile.workspace = true
+tower.workspace = true
+webauthn-authenticator-rs.workspace = true

@@ -1,0 +1,20 @@
+dn: ou=people,dc=example,dc=org
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=groups,dc=example,dc=org
+objectClass: organizationalUnit
+ou: groups
+
+dn: uid=alice,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+uid: alice
+cn: Alice Liddell
+sn: Liddell
+mail: alice@example.org
+userPassword: wonderland
+
+dn: cn=engineering,ou=groups,dc=example,dc=org
+objectClass: groupOfNames
+cn: engineering
+member: uid=alice,ou=people,dc=example,dc=org

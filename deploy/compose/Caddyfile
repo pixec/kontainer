@@ -1,0 +1,11 @@
+{$KONTAINER_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy registry:5000 {
+		# Large layer uploads: don't buffer them, don't time out.
+		flush_interval -1
+		transport http {
+			read_timeout 0
+			write_timeout 0
+		}
+	}
+}

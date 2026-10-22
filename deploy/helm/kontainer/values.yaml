@@ -1,0 +1,213 @@
+# Kontainer is stateless in front of PostgreSQL (database.*) and object storage (storage.*).
+# For several regions, give every region's release the same config with its own
+# storage.location and list the regions' buckets under storage.locations in `config`
+# (see docs/operations.md, Geo-replication).
+
+image:
+  # Build it from the repository root: `docker build -t <your-registry>/kontainer:0.2.0 .`
+  repository: kontainer
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# The URL users and Docker reach the registry at, e.g. https://registry.example.com. Defaults to
+# the ingress host (https when TLS is on).
+publicUrl: ""
+
+# The first administrator, created on first start when there are no users yet. Changing these
+# later doesn't change the account: use the UI.
+admin:
+  username: admin
+  # Empty: a random password, generated once and kept in the `<release>-admin` Secret.
+  password: ""
+  # Use your own Secret instead (keys `username` and `password`).
+  existingSecret: ""
+
+# Registry pods. More than one needs object storage (storage.driver s3, gcs or azure) so every
+# pod sees the same blobs; uploads, queues and sessions are shared through PostgreSQL. The data
+# volume then only holds scanner caches and temporary files, so it can stay small.
+replicaCount: 1
+
+# PostgreSQL, which holds accounts, permissions, tokens, builds and settings. Bring your own
+# (a managed service, CloudNativePG, ...) and give its URL here, or in a Secret whose `url` key
+# holds `postgres://user:password@host:5432/dbname`. One of the two is required.
+database:
+  url: ""
+  existingSecret: ""
+  # Connection pool size per replica.
+  pool: 16
+
+# Anything else, as Kontainer's TOML configuration (see config.example.toml). The settings
+# below (storage, builds, scanner, ...) are applied on top as environment variables.
+config: |
+  [server]
+  log = "info"
+
+  [auth]
+  mode = "token"
+
+  [policy]
+  time_machine = "7d"
+
+# Extra environment, e.g. `KONTAINER__GC__INTERVAL=24h` (any setting, as KONTAINER__SECTION__KEY).
+extraEnv: []
+extraEnvFrom: []
+
+storage:
+  # filesystem (the data volume) | s3 | gcs | azure | locations
+  # `locations`: several buckets, one per region, listed as [[storage.locations]] in `config`
+  # below; the keys under s3/gcs/azure here are then ignored.
+  driver: filesystem
+  # This release's own storage location name. With storage.locations in `config`, it must name
+  # one of them; the release in each region sets its own.
+  location: primary
+  # Key prefix inside the bucket.
+  prefix: ""
+  # s3/gcs/azure: send blob downloads straight to the bucket with presigned URLs.
+  redirect: false
+  s3:
+    # AWS S3, MinIO, Cloudflare R2, Ceph RGW...
+    bucket: ""
+    region: ""
+    endpoint: ""
+    virtualHostedStyle: false
+    allowHttp: false
+    # A Secret with the access keys. Empty: the pod's own identity (IRSA, instance role).
+    existingSecret: ""
+    accessKeyIdKey: access-key-id
+    secretAccessKeyKey: secret-access-key
+  gcs:
+    bucket: ""
+    # A Secret holding a service account key file. Empty: Workload Identity.
+    existingSecret: ""
+    key: key.json
+  azure:
+    container: ""
+    account: ""
+    # A Secret with the storage account key.
+    existingSecret: ""
+    accessKeyKey: access-key
+
+# The data volume: uploads in progress, scanner caches, and blobs with the filesystem driver.
+persistence:
+  enabled: true
+  size: 20Gi
+  storageClass: ""
+  accessModes: [ReadWriteOnce]
+  existingClaim: ""
+  annotations: {}
+  # Keep the volume when the release is uninstalled.
+  keep: true
+
+service:
+  type: ClusterIP
+  port: 5000
+  nodePort: ""
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  host: registry.example.com
+  annotations: {}
+    # Image layers are large: lift the proxy's body size limit and timeouts.
+    # nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    # nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    # nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    # cert-manager.io/cluster-issuer: letsencrypt
+  tls:
+    enabled: false
+    # Defaults to `<release>-tls`.
+    secretName: ""
+
+# Vulnerability scanning of pushed images. The image bundles trivy.
+scanner:
+  # none | trivy | grype
+  kind: none
+  scanOnPush: true
+  # Refuse pulls of images with vulnerabilities at or above this severity (empty: never).
+  blockPullAt: ""
+
+# Builds from Git. They need a runner: users and organizations can register their own
+# (`kontainer-runner` chart, or any machine with Docker), or turn on `runner` below for a
+# shared one in this cluster. A namespace gets the Builds tab once a runner serves it.
+builds:
+  enabled: true
+  # Let users and organization admins register runners for their own namespace.
+  selfHostedRunners: true
+  # Builds one user or organization may run at once, so a busy one can't take every slot.
+  # 0: no limit (namespaces with fewer builds running still go first).
+  maxPerNamespace: 0
+  timeout: 30m
+
+# A shared runner in this cluster that builds for every user and organization, each build a Job
+# next to a rootless BuildKit sidecar (Kubernetes 1.29+).
+runner:
+  enabled: false
+  # Builds at once; the registry keeps the rest queued.
+  concurrency: 2
+  builds:
+    # Where build Jobs run. Defaults to the release's namespace. Rootless BuildKit needs the
+    # `privileged` Pod Security level there.
+    namespace: ""
+    # Create `namespace`, labelled privileged.
+    createNamespace: false
+    cpu: "2"
+    memory: 4Gi
+    ephemeralStorage: 20Gi
+    nodeSelector: {}
+    tolerations: []
+    # Let build pods reach the registry and the internet, nothing else in the cluster (needs a
+    # CNI that enforces NetworkPolicy).
+    networkPolicy: false
+  # Any other runner setting, as KONTAINER_RUNNER__<SECTION>__<KEY>.
+  extraEnv: []
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+metrics:
+  # Prometheus scrapes /metrics with `Authorization: Bearer <token>`. Empty: generated once.
+  token: ""
+  existingSecret: ""
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+podSecurityContext:
+  fsGroup: 1000
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+resources:
+  requests: { cpu: 250m, memory: 256Mi }
+  limits: { memory: 1Gi }
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+extraVolumes: []
+extraVolumeMounts: []

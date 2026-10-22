@@ -1,0 +1,11 @@
+apiVersion: v2
+name: kontainer
+description: Kontainer, an OCI container registry with accounts, RBAC, scanning, builds from Git and a layer-inspection UI
+type: application
+version: 0.2.0
+appVersion: "0.2.0"
+license: AGPL-3.0-only
+home: https://pixec.net
+sources:
+  - https://github.com/zekr89/oci-registry
+keywords: [registry, oci, docker, containers]

@@ -1,0 +1,4 @@
+# Quick start from the repository root: `docker compose up` (reads deploy/compose/.env). The
+# add-ons (S3, builds, HTTPS) and settings are in deploy/compose.
+include:
+  - deploy/compose/compose.yaml

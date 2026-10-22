@@ -1,0 +1,33 @@
+[package]
+name = "kontainer-store"
+description = "Kontainer object storage, OCI layouts, garbage collection and usage reports"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+kontainer-core.workspace = true
+anyhow.workspace = true
+base64.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+flate2.workspace = true
+futures.workspace = true
+hex.workspace = true
+object_store.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tar.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+zstd.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

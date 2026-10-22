@@ -1,0 +1,57 @@
+# Register the runner in the registry first (your user or organization settings → Runners, or
+# Admin → Runners for a shared one) to get its token.
+
+# The registry, e.g. https://registry.example.com. Build pods reach it here too.
+server: ""
+# The runner's token, or an existing Secret holding it (key `token`).
+token: ""
+existingSecret: ""
+
+image:
+  repository: kontainer
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Builds at once; the registry keeps the rest queued.
+concurrency: 2
+
+# Each build runs as a Job next to a rootless BuildKit sidecar (Kubernetes 1.29+).
+builds:
+  # Where build Jobs run. Defaults to the release's namespace. Rootless BuildKit needs the
+  # `privileged` Pod Security level there.
+  namespace: ""
+  # Create `namespace`, labelled privileged.
+  createNamespace: false
+  cpu: "2"
+  memory: 4Gi
+  ephemeralStorage: 20Gi
+  nodeSelector: {}
+  tolerations: []
+  # Let build pods reach the registry and the internet, nothing else in the cluster.
+  networkPolicy: false
+
+# Any other runner setting, as KONTAINER_RUNNER__<SECTION>__<KEY>.
+extraEnv: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podSecurityContext: {}
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+resources:
+  requests: { cpu: 50m, memory: 64Mi }
+  limits: { memory: 256Mi }
+nodeSelector: {}
+tolerations: []
+affinity: {}

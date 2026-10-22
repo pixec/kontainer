@@ -1,0 +1,66 @@
+# Builds from Git: a shared runner that builds for every user and organization, handing each
+# image build to a BuildKit daemon. Neither sees the registry's credentials or its disk.
+#
+# SINGLE-TENANT ONLY. Every build runs in this one BuildKit daemon: a privileged container whose
+# cache and workers are shared by all builds. A Dockerfile's RUN steps are code from whoever
+# controls the Git repository, and a malicious one can read other builds' cache, or escape a
+# privileged daemon onto this host. Use this add-on only when everyone who can create build
+# triggers is trusted (your own team). For several teams or untrusted users, run builds with the
+# `docker` or `kubernetes` executor instead: a fresh, rootless BuildKit per build, with its own
+# limits and nothing shared (docs/builds.md, "Isolation").
+services:
+  buildkitd:
+    image: moby/buildkit:v0.17.3
+    # Only on the `buildkit` network: the runner reaches it, the registry and anything else on
+    # the default network don't. Its TCP port is not published on the host and has no TLS; for
+    # BuildKit on another machine use mTLS (--tlscacert/--tlscert/--tlskey, docs/builds.md).
+    command: ["--addr", "tcp://0.0.0.0:1234"]
+    restart: unless-stopped
+    networks: [buildkit]
+    # Building containers needs privileges. For a tighter sandbox use rootless BuildKit where the
+    # host allows unprivileged user namespaces (Ubuntu 23.10+ blocks them by default):
+    #   image: moby/buildkit:v0.17.3-rootless
+    #   command: ["--addr", "tcp://0.0.0.0:1234", "--oci-worker-no-process-sandbox"]
+    #   security_opt: ["seccomp=unconfined", "apparmor=unconfined"]
+    #   (and drop `privileged`; mount the volume at /home/user/.local/share/buildkit)
+    privileged: true
+    # One build can't take the whole host down.
+    mem_limit: ${KONTAINER_BUILDKIT_MEMORY:-4g}
+    cpus: ${KONTAINER_BUILDKIT_CPUS:-2}
+    pids_limit: 4096
+    volumes:
+      - buildkit:/var/lib/buildkit
+
+  runner:
+    image: ${KONTAINER_IMAGE:-kontainer:0.2.0}
+    command: ["runner"]
+    restart: unless-stopped
+    depends_on: [registry, buildkitd]
+    networks: [default, buildkit]
+    # On `docker compose stop` the runner cancels its builds and reports them failed (up to 25s).
+    stop_grace_period: 30s
+    environment:
+      KONTAINER_SERVER: http://registry:5000
+      KONTAINER_RUNNER_TOKEN: ${KONTAINER_RUNNER_TOKEN:?set KONTAINER_RUNNER_TOKEN in .env}
+      KONTAINER_RUNNER_NAME: default
+      KONTAINER_RUNNER__EXECUTOR: local
+      KONTAINER_RUNNER__BACKEND: buildctl
+      KONTAINER_RUNNER__BUILDKIT_ADDR: tcp://buildkitd:1234
+      KONTAINER_RUNNER__CONCURRENCY: ${KONTAINER_BUILD_CONCURRENCY:-2}
+      KONTAINER_RUNNER__WORK_DIR: /var/lib/registry/builds
+    volumes:
+      - runner:/var/lib/registry
+
+  registry:
+    environment:
+      # Registers the runner above as the shared runner `default`.
+      KONTAINER_RUNNER_TOKEN: ${KONTAINER_RUNNER_TOKEN}
+      KONTAINER__BUILDS__MAX_PER_NAMESPACE: ${KONTAINER_BUILDS_PER_NAMESPACE:-0}
+
+networks:
+  # Not `internal`: BuildKit pulls base images and the runner fetches Git repositories.
+  buildkit: {}
+
+volumes:
+  buildkit:
+  runner:

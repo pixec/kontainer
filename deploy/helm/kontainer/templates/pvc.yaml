@@ -1,0 +1,24 @@
+{{- if and (include "kontainer.usesPvc" .) (not .Values.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "kontainer.fullname" . }}-data
+  labels:
+    {{- include "kontainer.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.persistence.keep }}
+    helm.sh/resource-policy: keep
+    {{- end }}
+    {{- with .Values.persistence.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.accessModes | nindent 4 }}
+  {{- with .Values.persistence.storageClass }}
+  storageClassName: {{ if eq . "-" }}""{{ else }}{{ . | quote }}{{ end }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size | quote }}
+{{- end }}

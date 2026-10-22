@@ -1,0 +1,133 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kontainer.fullname" . }}
+  labels:
+    {{- include "kontainer.labels" . | nindent 4 }}
+spec:
+  {{- if and (gt (int .Values.replicaCount) 1) (eq .Values.storage.driver "filesystem") }}
+  {{- fail "replicaCount > 1 needs storage.driver s3, gcs or azure: the filesystem driver keeps blobs on the data volume" }}
+  {{- end }}
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    {{- if gt (int .Values.replicaCount) 1 }}
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+    {{- else }}
+    # One replica on a ReadWriteOnce volume: Recreate, so the old pod lets go of the volume
+    # before the new one starts.
+    type: Recreate
+    {{- end }}
+  selector:
+    matchLabels:
+      {{- include "kontainer.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: registry
+  template:
+    metadata:
+      labels:
+        {{- include "kontainer.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: registry
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "kontainer.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: kontainer
+          image: {{ include "kontainer.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [serve]
+          ports:
+            - name: http
+              containerPort: 5000
+              protocol: TCP
+          env:
+            {{- include "kontainer.env" . | nindent 12 }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          startupProbe:
+            httpGet: { path: /livez, port: http }
+            periodSeconds: 2
+            failureThreshold: 60
+          livenessProbe:
+            httpGet: { path: /livez, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/kontainer
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/registry
+            - name: tmp
+              mountPath: /tmp
+            {{- if and (eq .Values.storage.driver "gcs") .Values.storage.gcs.existingSecret }}
+            - name: gcs
+              mountPath: /var/run/secrets/kontainer/gcs
+              readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "kontainer.fullname" . }}
+        - name: tmp
+          emptyDir: {}
+        - name: data
+          {{- if include "kontainer.usesPvc" . }}
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-data" (include "kontainer.fullname" .)) .Values.persistence.existingClaim }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if and (eq .Values.storage.driver "gcs") .Values.storage.gcs.existingSecret }}
+        - name: gcs
+          secret:
+            secretName: {{ .Values.storage.gcs.existingSecret }}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

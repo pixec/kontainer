@@ -1,0 +1,64 @@
+# Kontainer with Docker Compose. Images live in the `data` volume, accounts and settings in the
+# bundled PostgreSQL (`pgdata` volume).
+#
+#   cp .env.example .env    # set KONTAINER_ADMIN_PASSWORD at least
+#   docker compose up -d
+#
+# Add-ons, combined with -f (or listed in COMPOSE_FILE in .env):
+#   compose.s3.yaml      blobs in RustFS (S3-compatible) instead of the volume
+#   compose.builds.yaml  builds from Git: a shared runner and a BuildKit daemon
+#   compose.https.yaml   Caddy in front, with automatic HTTPS for KONTAINER_DOMAIN
+name: kontainer
+
+services:
+  registry:
+    image: ${KONTAINER_IMAGE:-kontainer:0.2.0}
+    build:
+      context: ../..
+    restart: unless-stopped
+    ports:
+      - "${KONTAINER_PORT:-5000}:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - data:/var/lib/registry
+      - ./config.toml:/etc/kontainer/config.toml:ro
+    environment:
+      KONTAINER_DATABASE_URL: postgres://kontainer:${KONTAINER_DB_PASSWORD:?set KONTAINER_DB_PASSWORD in .env}@postgres:5432/kontainer
+      KONTAINER_PUBLIC_URL: ${KONTAINER_PUBLIC_URL:-http://localhost:5000}
+      KONTAINER_ADMIN_USERNAME: ${KONTAINER_ADMIN_USERNAME:-admin}
+      KONTAINER_ADMIN_PASSWORD: ${KONTAINER_ADMIN_PASSWORD:?set KONTAINER_ADMIN_PASSWORD in .env}
+      KONTAINER_METRICS_TOKEN: ${KONTAINER_METRICS_TOKEN:-}
+      # Scanning with the bundled trivy. It pulls each image with a short-lived, pull-only token
+      # the registry mints for that scan; no account is needed. Set KONTAINER_SCANNER_USERNAME /
+      # PASSWORD in .env only to scan through a different registry host.
+      KONTAINER__SCANNER__KIND: ${KONTAINER_SCANNER:-trivy}
+      KONTAINER__SCANNER__REGISTRY_HOST: 127.0.0.1:5000
+      KONTAINER__SCANNER__USERNAME: ${KONTAINER_SCANNER_USERNAME:-}
+      KONTAINER_SCANNER_PASSWORD: ${KONTAINER_SCANNER_PASSWORD:-}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5000/readyz"]
+      interval: 10s
+      timeout: 3s
+      start_period: 20s
+      retries: 3
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kontainer
+      POSTGRES_PASSWORD: ${KONTAINER_DB_PASSWORD:?set KONTAINER_DB_PASSWORD in .env}
+      POSTGRES_DB: kontainer
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kontainer -d kontainer"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  data:
+  pgdata:

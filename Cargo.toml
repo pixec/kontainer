@@ -1,0 +1,73 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+homepage = "https://pixec.net"
+repository = "https://github.com/zekr89/oci-registry"
+
+[workspace.dependencies]
+kontainer-core = { path = "crates/kontainer-core" }
+kontainer-store = { path = "crates/kontainer-store" }
+kontainer-server = { path = "crates/kontainer-server" }
+
+# AES-256-GCM for secrets at rest (`kontainer_core::crypto`).
+aes-gcm = "0.10"
+anyhow = "1.0.104"
+argon2 = "0.6.0"
+async-trait = "0.1.92"
+axum = "0.8"
+base64 = "0.23.1"
+# Docker API, for the `docker` build executor.
+bollard = "0.21"
+bcrypt = "0.19.3"
+bytes = "1.12.1"
+chrono = { version = "0.4.45", features = ["serde"] }
+clap = { version = "4.6.7", features = ["derive", "env"] }
+flate2 = "1.1.10"
+futures = "0.3.34"
+hex = "0.4.3"
+# Derives the secrets-at-rest key from the configured key material.
+hkdf = "0.12"
+hmac = "0.12"
+# CIDR ranges for `server.trusted_proxies`; already in the tree via reqwest.
+ipnet = "2.12"
+http-body-util = "0.1.5"
+jsonwebtoken = { version = "11.1.0", features = ["aws_lc_rs"] }
+ldap3 = { version = "0.12", default-features = false, features = ["tls-rustls-aws-lc-rs"] }
+mime_guess = "2.0.5"
+object_store = { version = "0.14.2", features = ["aws", "gcp", "azure"] }
+# Cosign signature verification (ECDSA P-256); already in the tree via jsonwebtoken.
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8", "pem"] }
+qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
+rand = "0.10.3"
+regex = "1.13.1"
+reqwest = { version = "0.13.5", default-features = false, features = ["form", "json", "rustls", "stream"] }
+rust-embed = { version = "8.13.0", features = ["axum"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.10"
+sqlx = { version = "0.9.0", features = ["runtime-tokio", "postgres", "tls-rustls-aws-lc-rs", "chrono", "migrate"] }
+tantivy = "0.26"
+tar = "0.4.46"
+tempfile = "3.27.0"
+thiserror = "2.0.21"
+tokio = { version = "1.53.2", features = ["macros", "rt-multi-thread", "fs", "io-util", "signal", "process", "sync", "time"] }
+tokio-util = { version = "0.7.20", features = ["io", "io-util"] }
+toml = "1.1.8"
+totp-rs = { version = "6.0.0", features = ["gen_secret", "otpauth"] }
+tower = { version = "0.5.3", features = ["util"] }
+tower-http = { version = "0.7.1", features = ["trace", "cors", "set-header"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+url = "2.5.8"
+uuid = { version = "1.28.0", features = ["v4"] }
+# Passkeys (WebAuthn). State serialisation: ceremonies are stored in PostgreSQL between their
+# two requests, which may reach different instances.
+webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation", "conditional-ui"] }
+# Tests only: a software authenticator.
+webauthn-authenticator-rs = { version = "0.5.5", features = ["softpasskey"] }
+zstd = "0.14.2"

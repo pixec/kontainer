@@ -1,0 +1,10 @@
+The runner {{ include "runner.fullname" . }} is starting. It shows as online in the registry once it
+connects to {{ .Values.server }}.
+
+Builds run as Jobs in {{ include "runner.buildsNamespace" . }}.
+{{- if not .Values.builds.createNamespace }} Rootless BuildKit needs the `privileged` Pod Security
+level there:
+     kubectl label namespace {{ include "runner.buildsNamespace" . }} pod-security.kubernetes.io/enforce=privileged
+{{- end }}
+
+Logs: kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "runner.fullname" . }}

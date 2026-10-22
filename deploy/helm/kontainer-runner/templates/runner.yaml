@@ -1,0 +1,69 @@
+{{- $fullname := include "runner.fullname" . }}
+{{- if not .Values.existingSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "runner.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  token: {{ required "token (or existingSecret) is required: register the runner in the registry to get one" .Values.token | quote }}
+---
+{{- end }}
+{{- if .Values.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "runner.serviceAccountName" . }}
+  labels:
+    {{- include "runner.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+{{- end }}
+{{ include "runner.rbac" (dict "root" . "name" $fullname "namespace" (include "runner.buildsNamespace" .) "serviceAccount" (include "runner.serviceAccountName" .) "values" .Values) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "runner.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "runner.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "runner.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "runner.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        {{- include "runner.container" (dict "root" . "image" (include "runner.image" .) "pullPolicy" .Values.image.pullPolicy "server" (required "server is required: the registry's URL" .Values.server) "secret" (include "runner.secret" .) "buildsNamespace" (include "runner.buildsNamespace" .) "imagePullSecrets" .Values.imagePullSecrets "values" .Values) | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

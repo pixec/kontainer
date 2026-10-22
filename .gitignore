@@ -1,0 +1,16 @@
+/target
+/data
+ui/node_modules
+web/dist
+.idea
+.DS_Store
+
+# Compose secrets
+deploy/compose/.env
+
+# editor and agent tooling
+.idea/
+.agents/
+.claude/
+skills-lock.json
+.conformance/

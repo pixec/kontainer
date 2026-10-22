@@ -1,0 +1,37 @@
+name: OCI conformance
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: kontainer
+          POSTGRES_PASSWORD: kontainer
+          POSTGRES_DB: kontainer
+        ports: ["55432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U kontainer -d kontainer"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - run: sudo apt-get install -y --no-install-recommends postgresql-client
+      - name: Run the OCI distribution-spec conformance suite
+        run: scripts/conformance.sh
+        env:
+          KONTAINER_TEST_DATABASE_URL: postgres://kontainer:kontainer@127.0.0.1:55432/kontainer
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: oci-conformance
+          path: .conformance/results/

@@ -1,0 +1,17 @@
+# Kontainer's configuration (every setting: config.example.toml in the repository).
+# compose.yaml and its add-ons set storage, scanning and builds through KONTAINER__* variables,
+# which win over this file.
+
+[server]
+log = "info"
+
+[auth]
+mode = "token"
+# public_repositories = ["public/**"]
+
+[policy]
+time_machine = "7d"
+# default_user_quota = "10g"
+
+[gc]
+interval = "24h"

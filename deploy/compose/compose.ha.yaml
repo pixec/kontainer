@@ -1,0 +1,27 @@
+# The high-availability topology on one host, for trying it out: three registry containers
+# behind Caddy, one PostgreSQL, blobs in RustFS. A real deployment spreads the registry
+# containers over machines and uses a managed PostgreSQL and object store.
+#
+#   docker compose -f compose.yaml -f compose.s3.yaml -f compose.ha.yaml up -d
+#
+# Caddy round-robins over the registry replicas, taking one out while its /readyz fails.
+# Nothing needs sticky sessions: uploads, sessions and tokens work from any replica.
+services:
+  registry:
+    # Only Caddy talks to the replicas; the published port moves to Caddy.
+    ports: !reset []
+    deploy:
+      replicas: 3
+    environment:
+      KONTAINER_PUBLIC_URL: ${KONTAINER_PUBLIC_URL:-http://localhost:5000}
+      # Caddy sets X-Forwarded-For; believe it from the compose network only.
+      KONTAINER__SERVER__TRUSTED_PROXIES: '["172.16.0.0/12"]'
+
+  caddy:
+    image: caddy:2.10
+    restart: unless-stopped
+    ports:
+      - "${KONTAINER_PORT:-5000}:5000"
+    volumes:
+      - ./Caddyfile.ha:/etc/caddy/Caddyfile:ro
+    depends_on: [registry]

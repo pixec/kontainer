@@ -1,0 +1,27 @@
+# Caddy in front, with a certificate from Let's Encrypt for KONTAINER_DOMAIN (its DNS must point
+# here and ports 80 and 443 must be reachable).
+services:
+  caddy:
+    image: caddy:2.10
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      KONTAINER_DOMAIN: ${KONTAINER_DOMAIN:?set KONTAINER_DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [registry]
+
+  registry:
+    # Only Caddy talks to the registry.
+    ports: !reset []
+    environment:
+      KONTAINER_PUBLIC_URL: https://${KONTAINER_DOMAIN}
+
+volumes:
+  caddy-data:
+  caddy-config:

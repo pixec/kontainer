@@ -1,0 +1,8 @@
+# Keep the build context small: Docker builds from source, not from local build output.
+target/
+data/
+ui/node_modules/
+web/dist/
+.git/
+.idea/
+.DS_Store

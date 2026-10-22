@@ -1,0 +1,51 @@
+# Blobs in RustFS (S3-compatible object storage). To use another S3 store (AWS, R2, Ceph...),
+# drop the rustfs services and point the KONTAINER__STORAGE__S3__* settings at it.
+services:
+  rustfs:
+    image: rustfs/rustfs:1.0.1
+    restart: unless-stopped
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-kontainer}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:?set RUSTFS_SECRET_KEY in .env}
+    ports:
+      - "127.0.0.1:9001:9001" # console
+    volumes:
+      - rustfs:/data
+
+  # Creates the bucket once RustFS answers.
+  rustfs-init:
+    image: amazon/aws-cli:2.37.11
+    depends_on: [rustfs]
+    restart: "no"
+    environment:
+      AWS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY:-kontainer}
+      AWS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY}
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for i in $$(seq 1 60); do
+          aws --endpoint-url http://rustfs:9000 s3api head-bucket --bucket registry 2>/dev/null && exit 0
+          aws --endpoint-url http://rustfs:9000 s3api create-bucket --bucket registry && exit 0
+          sleep 1
+        done
+        echo "RustFS didn't come up" >&2; exit 1
+
+  registry:
+    depends_on:
+      rustfs-init: { condition: service_completed_successfully }
+    environment:
+      KONTAINER__STORAGE__DRIVER: s3
+      KONTAINER__STORAGE__S3__BUCKET: registry
+      KONTAINER__STORAGE__S3__ENDPOINT: http://rustfs:9000
+      KONTAINER__STORAGE__S3__REGION: us-east-1
+      KONTAINER__STORAGE__S3__ALLOW_HTTP: "true"
+      AWS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY:-kontainer}
+      AWS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY}
+
+volumes:
+  rustfs:

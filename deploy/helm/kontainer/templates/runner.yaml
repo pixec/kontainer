@@ -1,0 +1,49 @@
+{{- if .Values.runner.enabled }}
+{{- $fullname := include "kontainer.fullname" . }}
+{{- $name := printf "%s-runner" $fullname }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "kontainer.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  token: {{ include "kontainer.keep" (dict "namespace" .Release.Namespace "name" $name "key" "token" "fallback" (printf "kr_%s" (randAlphaNum 40))) | quote }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "kontainer.labels" . | nindent 4 }}
+---
+{{ include "runner.rbac" (dict "root" . "name" $name "namespace" (include "kontainer.buildsNamespace" .) "serviceAccount" $name "values" .Values.runner "registrySelector" (list (dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" .Release.Namespace)) "podSelector" (dict "matchLabels" (merge (dict "app.kubernetes.io/component" "registry") (include "kontainer.selectorLabels" . | fromYaml)))))) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "kontainer.labels" . | nindent 4 }}
+    app.kubernetes.io/component: runner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "kontainer.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: runner
+  template:
+    metadata:
+      labels:
+        {{- include "kontainer.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: runner
+    spec:
+      serviceAccountName: {{ $name }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        {{- include "runner.container" (dict "root" . "image" (include "kontainer.image" .) "pullPolicy" .Values.image.pullPolicy "server" (include "kontainer.internalUrl" .) "secret" $name "buildsNamespace" (include "kontainer.buildsNamespace" .) "imagePullSecrets" .Values.imagePullSecrets "runnerName" "default" "values" .Values.runner) | nindent 8 }}
+{{- end }}

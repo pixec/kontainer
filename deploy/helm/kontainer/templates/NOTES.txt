@@ -1,0 +1,35 @@
+Kontainer {{ .Chart.AppVersion }} is starting.
+{{- $url := include "kontainer.publicUrl" . }}
+
+1. Open the registry:
+{{- if $url }}
+     {{ $url }}
+{{- else }}
+     kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kontainer.fullname" . }} 5000:{{ .Values.service.port }}
+     open http://localhost:5000
+   (Set `publicUrl` or enable the ingress so tokens and redirects use the right address.)
+{{- end }}
+
+2. Sign in as {{ .Values.admin.username | quote }}{{ if not (or .Values.admin.existingSecret .Values.admin.password) }} with the generated password{{ end }}:
+     kubectl -n {{ .Release.Namespace }} get secret {{ include "kontainer.adminSecret" . }} -o jsonpath='{.data.password}' | base64 -d; echo
+
+3. Push an image:
+     docker login {{ if $url }}{{ regexReplaceAll "^https?://" $url "" }}{{ else }}localhost:5000{{ end }}
+     docker tag alpine {{ if $url }}{{ regexReplaceAll "^https?://" $url "" }}{{ else }}localhost:5000{{ end }}/{{ .Values.admin.username }}/alpine
+     docker push {{ if $url }}{{ regexReplaceAll "^https?://" $url "" }}{{ else }}localhost:5000{{ end }}/{{ .Values.admin.username }}/alpine
+{{- if .Values.runner.enabled }}
+
+A shared runner builds for every user and organization, each build a Job in {{ include "kontainer.buildsNamespace" . }}.
+{{- if not .Values.runner.builds.createNamespace }} Rootless BuildKit needs the
+`privileged` Pod Security level there:
+     kubectl label namespace {{ include "kontainer.buildsNamespace" . }} pod-security.kubernetes.io/enforce=privileged
+{{- end }}
+{{- else if .Values.builds.enabled }}
+
+Builds need a runner: register one under Settings → Runners (or Admin → Runners for a shared
+one), or set runner.enabled=true for a shared runner in this cluster.
+{{- end }}
+{{- if not .Values.persistence.enabled }}
+
+WARNING: persistence is off. Accounts, settings{{ if eq .Values.storage.driver "filesystem" }} and every image{{ end }} are lost when the pod restarts.
+{{- end }}

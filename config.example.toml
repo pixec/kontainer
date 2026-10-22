@@ -1,0 +1,233 @@
+# kontainer configuration. Every section is optional; defaults are shown.
+# Any setting can be overridden as KONTAINER__<SECTION>__<KEY>, e.g. KONTAINER__BUILDS__ENABLED=true
+# (docs/deployment.md). Shorthands: KONTAINER_BIND, KONTAINER_PUBLIC_URL, KONTAINER_STORAGE_DRIVER,
+# KONTAINER_STORAGE_ROOT, KONTAINER_UPLOAD_DIR, KONTAINER_S3_BUCKET, KONTAINER_S3_ENDPOINT, KONTAINER_LOG,
+# KONTAINER_DATABASE_URL, KONTAINER_AUTH_SECRET, KONTAINER_METRICS_TOKEN, KONTAINER_ADMIN_USERNAME and
+# KONTAINER_ADMIN_PASSWORD, KONTAINER_OIDC_CLIENT_SECRET, KONTAINER_LDAP_BIND_PASSWORD, KONTAINER_SCANNER_PASSWORD.
+
+[server]
+bind = "0.0.0.0:5000"
+# public_url = "https://registry.example.com"   # used in Location headers
+max_manifest_size = 4194304
+# Largest blob (layer) a push may upload, e.g. "10g" or "512Mi"; larger uploads get 413
+# SIZE_INVALID. Unset: no limit beyond namespace quotas.
+# max_blob_size = "20g"
+# Reverse proxies whose X-Forwarded-For is believed (addresses or CIDR ranges). The client
+# address (sign-in rate limits, the session list) is the TCP peer unless it is one of these.
+# Behind a proxy, set this: otherwise every client counts as the proxy's address.
+# trusted_proxies = ["10.0.0.0/8", "127.0.0.1"]
+# ready_requires_all_locations = false  # /readyz also probes the other regions' buckets
+log = "info,kontainer=debug"
+
+[storage]
+driver = "filesystem"          # filesystem | s3 | gcs | azure | memory
+upload_dir = "./data/_uploads" # local per-request temp files; need not be shared between instances
+                               # (upload sessions live in the database, their chunks in the backend)
+upload_ttl = "24h"             # abandoned uploads older than this are purged
+# prefix = "registry"          # key prefix inside the bucket
+location = "primary"           # this instance's own location (KONTAINER_STORAGE_LOCATION)
+redirect = false               # s3/gcs/azure: serve blob downloads as presigned URLs
+redirect_ttl = "15m"
+# region_header = "CloudFront-Viewer-Country"  # set by your CDN/proxy; picks a location per client
+replication_concurrency = 4    # blob copy workers per instance (with several locations)
+
+[storage.filesystem]
+root = "./data"
+
+[storage.s3]
+# Works with AWS S3, MinIO, Cloudflare R2, Ceph RGW, ...
+# Credentials fall back to AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / IAM roles.
+bucket = ""
+# region = "us-east-1"
+# endpoint = "http://minio:9000"
+# access_key_id = ""
+# secret_access_key = ""
+# virtual_hosted_style = false
+# allow_http = true
+# skip_signature = false
+
+[storage.gcs]
+bucket = ""
+# service_account_path = "/secrets/sa.json"
+
+[storage.azure]
+container = ""
+# account = ""
+# access_key = ""
+
+# Geo-replication (docs/operations.md): instead of one `driver`, list a location per region.
+# Every region runs this same file with its own KONTAINER_STORAGE_LOCATION; pushes land in the
+# instance's location and are copied to the others; pulls use the nearest one.
+# [[storage.locations]]
+# name = "eu"
+# driver = "s3"                # filesystem | s3 | gcs | azure
+# regions = ["DE", "FR", "eu-*"]   # region_header values served from here; none = standby only
+# redirect = true
+# [storage.locations.s3]
+# bucket = "registry-eu"
+# region = "eu-central-1"
+#
+# [[storage.locations]]
+# name = "us"
+# driver = "s3"
+# regions = ["US", "CA", "us-*"]
+# redirect = true
+# [storage.locations.s3]
+# bucket = "registry-us"
+# region = "us-east-1"
+
+[auth]
+mode = "token"                # none | basic | token (docker-style bearer tokens; the default)
+# allow_insecure_none = false # `none` makes everyone a superuser: refused unless bound to loopback or this is true
+realm = "kontainer"
+database_url = "postgres://kontainer:kontainer@127.0.0.1:5432/kontainer"  # users, roles, sessions, tokens, builds, settings
+# database_pool = 16          # connections per process
+# secret = ""                 # bearer-token signing key (32+ bytes); generated and stored in the db if unset
+# encryption_key = ""         # encrypts secrets stored in the db (32+ bytes, KONTAINER_ENCRYPTION_KEY); derived from `secret` if unset; see docs/operations.md
+# service = "registry.example.com"  # token audience; defaults to the host of public_url
+session_ttl = "7d"
+token_ttl = "1h"
+anonymous_roles = []          # roles granted to unauthenticated requests
+public_repositories = []      # globs anyone may pull, e.g. ["public/**"]
+# Created on first start when no users exist. Change the password afterwards (UI → settings).
+# bootstrap_admin = { username = "admin", password = "change-me-now" }
+
+# Roles are bundles of rules. Each rule grants actions on repositories matching globs:
+#   `*` matches within one path segment, `**` matches across segments.
+# Repository actions: pull, push, delete, delete_repository, scan, logs, metadata, visibility,
+#   permissions, state, builds, mirror, admin (= all of them).
+# Global permissions: users:read, users:write, roles:write, gc, logs:all, catalog, orgs:create,
+#   system (= superuser).
+# Roles and users defined here are synced into the database on start and are read-only in the
+# UI; everything else (roles created in the UI, SSO users, robots, tokens) lives in the database.
+# [[auth.roles]]
+# name = "readers"
+# description = "Pull anything"
+# rules = [{ repositories = ["**"], actions = ["pull"] }]
+#
+# [[auth.roles]]
+# name = "team-a-dev"
+# rules = [{ repositories = ["team-a/**"], actions = ["pull", "push", "scan", "logs"] }]
+#
+# [[auth.roles]]
+# name = "team-a-ops"
+# rules = [{ repositories = ["team-a/**"], actions = ["admin"] }]
+# global = ["gc"]
+#
+# [[auth.users]]
+# username = "alice"
+# password_hash = "$argon2id$..."     # kontainer hash-password (prompts)  (bcrypt hashes also work)
+# roles = ["readers", "team-a-dev"]
+#
+# [[auth.users]]                      # robot account for CI
+# username = "team-a+ci"
+# password = "plain-text-only-for-dev"
+# roles = ["team-a-dev"]
+# robot = true
+
+[auth.oidc]                   # single sign-on (Google, Okta, Keycloak, Entra ID, Authentik, ...)
+enabled = false
+display_name = "SSO"
+issuer = ""                   # e.g. "https://accounts.google.com" or "https://keycloak/realms/main"
+client_id = ""
+client_secret = ""
+# redirect_url = "https://registry.example.com/auth/oidc/callback"   # defaults to public_url + /auth/oidc/callback
+scopes = ["openid", "profile", "email"]
+username_claim = "preferred_username"
+# groups_claim = "groups"     # map identity-provider groups to roles on every login
+# group_roles = { "registry-admins" = ["system"], "developers" = ["readers"] }
+default_roles = []            # roles every SSO user gets
+auto_create_users = true      # false: only pre-created accounts may sign in
+
+[auth.ldap]                   # directory sign-in (docs/authentication.md)
+enabled = false
+url = ""                      # ldaps://ldap.example.com:636, or ldap://...:389 with start_tls
+start_tls = false
+allow_insecure = false        # permit plain ldap:// without start_tls (passwords in clear text)
+bind_dn = ""                  # service account; empty = anonymous bind
+bind_password = ""
+user_base_dn = ""             # e.g. "ou=people,dc=example,dc=com"
+user_filter = "(uid={username})"   # Active Directory: "(sAMAccountName={username})"
+username_attr = "uid"
+email_attr = "mail"
+name_attr = "cn"
+group_base_dn = ""            # empty: read the user's memberOf
+group_filter = "(|(member={dn})(memberUid={username}))"
+group_name_attr = "cn"
+default_roles = []
+# group_roles = { "registry-admins" = ["system"], "developers" = ["readers"] }
+
+[scanner]
+kind = "none"                 # none | trivy | grype
+# binary = "/usr/local/bin/trivy"
+scan_on_push = true
+# registry_host = "127.0.0.1:5000"  # how the scanner reaches this registry
+insecure = true               # registry is plain HTTP for the scanner
+# username = "scanner"        # optional: unset, each scan gets a short-lived pull-only token
+# password = ""
+store_raw = false             # keep the scanner's raw JSON in the report
+workers = 1
+timeout = "10m"
+# block_pull_at = "critical"  # refuse manifests with vulns at/above this severity
+# rescan_interval = "7d"       # rescan images whose report is older, to catch new vulnerabilities
+# max_auto_per_hour = 0        # automatic scans (on push, rescans) per hour, cluster-wide; 0: unlimited
+# max_queue = 10000            # skip new scans while this many wait or run; 0: unlimited
+# extra_args = ["--ignore-unfixed"]
+# [scanner.env]
+# TRIVY_CACHE_DIR = "/var/cache/trivy"
+
+[features]
+delete = true
+catalog = true
+cross_repo_mount = true
+referrers = true
+containerd_ns = true           # serve containerd mirror pulls (?ns=<host>) from the matching pull-through cache
+
+[ui]
+enabled = true
+max_layer_entries = 5000
+
+[audit]
+enabled = true
+log_pulls = false
+
+[policy]
+# immutable_tags = [{ repositories = ["prod/**"], tags = ["v*", "release-*"] }]
+time_machine = "7d"             # deleted or moved tags stay restorable this long; "0s" = off
+# default_user_quota = "10g"    # storage quota for users without one of their own
+# default_org_quota = "100g"    # same for organizations; admins can still set one per namespace, or none
+# webhooks_allow_private_targets = false  # let namespace webhooks reach internal addresses
+# robot_expiry_days = 90         # robot credentials expire after this by default (owners can pick otherwise)
+
+[metrics]                       # Prometheus at /metrics (see docs/operations.md)
+enabled = true
+# token = "a-long-random-string" # required; scrapers send `Authorization: Bearer <token>`
+                                 # (or set KONTAINER_METRICS_TOKEN). Without it /metrics answers 403.
+
+[retention]                     # tag retention policies are defined per namespace in the UI
+interval = "1h"                 # how often enabled policies run
+report_ttl = "10m"              # how long a storage report is reused
+
+# Registry-wide webhooks. Namespace admins can add their own in the UI (docs/webhooks.md).
+# [[webhooks]]
+# name = "slack-bridge"
+# url = "https://hooks.example.com/registry"
+# events = ["push", "delete", "scan"]   # empty = push, delete and scan
+# repositories = ["prod/**"]           # empty = all
+# headers = { Authorization = "Bearer ..." }
+
+[gc]                            # scheduled garbage collection (it can always be run by hand)
+# interval = "24h"              # unset: only by hand
+# delete_untagged = false       # also remove manifests no tag points at
+
+[builds]                        # images built from Git (docs/builds.md); runners do the building
+enabled = true                  # false: no build triggers or runners at all
+self_hosted_runners = true      # users and organizations may register runners for themselves
+timeout = "30m"
+# heartbeat_timeout = "2m"      # a build whose runner goes quiet this long is failed
+# max_per_namespace = 0         # builds one user or organization may run at once (0 = no limit)
+#
+# [[builds.runners]]            # a shared runner defined here (or KONTAINER_RUNNER_TOKEN: one named "default")
+# name = "default"
+# token = "a-long-random-secret"  # start it with: KONTAINER_RUNNER_TOKEN=<token> kontainer runner --server <url>
+# namespaces = []               # whom it builds for; empty = everyone

@@ -1,0 +1,182 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --color-success: var(--success);
+    --color-warning: var(--warning);
+    --color-info: var(--info);
+    --color-tab: var(--tab);
+    --color-canvas-subtle: var(--canvas-subtle);
+    --font-heading: var(--font-sans);
+    --font-sans: 'Geist Variable', sans-serif;
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.205 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.97 0 0);
+    --secondary-foreground: oklch(0.205 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --radius: 0.5rem;
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.205 0 0);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.97 0 0);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.708 0 0);
+    --success: oklch(0.6 0.15 150);
+    --warning: oklch(0.7 0.15 80);
+    --info: oklch(0.55 0.2 255);
+    --tab: var(--primary);
+    --canvas-subtle: oklch(0.97 0 0);
+}
+
+.dark {
+    /* Vercel/Geist-style: true black page, near-black surfaces, thin gray borders. */
+    --background: #000000;
+    --foreground: #ededed;
+    --card: #0a0a0a;
+    --card-foreground: #ededed;
+    --popover: #0a0a0a;
+    --popover-foreground: #ededed;
+    --primary: #ededed;
+    --primary-foreground: #000000;
+    --secondary: #1a1a1a;
+    --secondary-foreground: #ededed;
+    --muted: #111111;
+    --muted-foreground: #a1a1a1;
+    --accent: #1a1a1a;
+    --accent-foreground: #ededed;
+    --destructive: #ff6166;
+    --border: rgb(255 255 255 / 0.1);
+    --input: rgb(255 255 255 / 0.1);
+    --ring: rgb(255 255 255 / 0.22);
+    --chart-1: #52a8ff;
+    --chart-2: #62c073;
+    --chart-3: #ffb224;
+    --chart-4: #ff6166;
+    --chart-5: #a1a1a1;
+    --sidebar: #000000;
+    --sidebar-foreground: #ededed;
+    --sidebar-primary: #ededed;
+    --sidebar-primary-foreground: #000000;
+    --sidebar-accent: #1a1a1a;
+    --sidebar-accent-foreground: #ededed;
+    --sidebar-border: rgb(255 255 255 / 0.1);
+    --sidebar-ring: rgb(255 255 255 / 0.22);
+    --success: #62c073;
+    --warning: #ffb224;
+    --info: #52a8ff;
+    --tab: var(--foreground);
+    --canvas-subtle: #000000;        /* inset: code, copy fields inside cards */
+}
+
+/* Small tinted label: topics, platforms, counts. */
+@utility chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border-radius: calc(var(--radius) * 0.8);
+    background: #1a1a1a;
+    padding: 0.125rem 0.375rem;
+    font-size: 0.75rem;
+    line-height: 1.25rem;
+    font-weight: 500;
+    color: var(--muted-foreground);
+    white-space: nowrap;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    }
+  a, button, input, textarea, select, [data-slot="card"] {
+    transition-property: color, background-color, border-color, box-shadow;
+    transition-duration: 150ms;
+    }
+  body {
+    @apply bg-background text-foreground;
+    }
+  html {
+    @apply font-sans;
+    /* Keep the scrollbar slot reserved so short and long pages do not shift sideways. */
+    scrollbar-gutter: stable;
+    }
+}
+/* app-wide polish */
+body { background: var(--background); font-size: 14px; -webkit-font-smoothing: antialiased; }
+a { text-underline-offset: 3px; }
+input[type="radio"], input[type="checkbox"] { accent-color: var(--foreground); }
+code, kbd, pre, .font-mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+::selection { background: oklch(0.55 0.01 260 / 50%); }
+
+/* Placeholders appear only if loading takes a moment, so quick loads don't flash. */
+@keyframes placeholder-in {
+  from { opacity: 0; }
+}
+@utility placeholder-in {
+  animation: placeholder-in 0.3s ease 0.2s both;
+}
