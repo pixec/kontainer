@@ -4249,6 +4249,14 @@ async fn creating_empty_repositories() {
     let (ben, cat) = (login("ben").await, login("cat").await);
     let create = |cookie: String, body: Value| { let app = app.clone(); async move { send(&app, Method::POST, "/api/v1/repositories", &[("cookie", &cookie), jh], serde_json::to_vec(&body).unwrap()).await } };
 
+    // Even the superuser gets no ownerless repository: the namespace must be a user or an org.
+    let r = create(root.clone(), json!({ "name": "nobody/app" })).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", String::from_utf8_lossy(&r.body));
+    let r = create(root.clone(), json!({ "name": "toplevel" })).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "a repository needs a namespace");
+    let r = create(root.clone(), json!({ "name": "dan/by-root" })).await;
+    assert_eq!(r.status, StatusCode::CREATED, "a superuser may still create in an existing user's namespace");
+
     // In one's own namespace: 201 with the repository-meta view.
     let r = create(ben.clone(), json!({ "name": "ben/app", "description": "My app", "topics": ["go"] })).await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&r.body));
